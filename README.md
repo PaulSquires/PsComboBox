@@ -1,356 +1,864 @@
 # CComboBox
 
-A reusable owner-drawn **dropdown selector** for FreeBASIC + Win32, in the AfxNova control
-family: a button showing the current choice with a stacked up/down chevron on its right,
-which drops a list of alternatives where exactly one — the current one — is checkmarked.
+An owner-drawn dropdown selector for FreeBASIC Win32 applications: a button showing the
+current choice with a stacked up/down chevron on its right, which drops a list of the
+alternatives where exactly one — the current one — is checkmarked.
 
-Single selection only. No text entry, no multi-select, no icons.
+Single selection only. There is no text entry, no multi-select, no per-item icons and no
+tooltips. It takes focus, so it can be reached with Tab and driven with the arrow keys, and it
+draws itself entirely — there is no system `COMBOBOX` underneath, and nothing about its
+appearance depends on the visual style the user happens to be running. Every colour it paints
+is one you can set.
 
-It is the thirteenth control in the family (`CListBox`, `CVScrollBar`, `CHScrollBar`,
-`CStatusBar`, `CTabBar`, `CTextBox`, `CColumnHeader`, `CMenuBar`, `CPopupMenu`, `CSplitter`,
-`CIconPanel`, `CSelectBar`, `CToggle`) and follows the same shape: one real `HWND`, all state
-in a `TYPE` in the `CWindow` UserData area, host-supplied font and colours, host callbacks,
-one `CBufferPaint` per `WM_PAINT`, lazy layout, no host globals.
+The button has no label of its own. It shows the selected item's caption (or a placeholder, or
+nothing at all), so a field label goes beside it, positioned by you.
+
+The dropdown is a **CPopupMenu** — a second, top-level window that the control creates and owns.
+That is where the two obligations in *Requirements* come from, and it is the source of several
+entries in *Behaviour and limits*: in particular, **the list does not scroll**.
 
 ---
 
-## Files
+## Requirements
 
-| File | Role |
+**Files to copy into your project:**
+
+| File | Purpose |
 |---|---|
-| `CComboBox.bi` | Types, colours, callbacks, the public API, the geometry contract |
-| `CComboBox.inc` | Window class, layout, painter, WndProc, dropdown integration, self-test |
-| `CBufferPaint.bi` / `.inc` | Vendored from [CBufferPaint](https://github.com/PaulSquires/CBufferPaint) — byte-identical |
-| `CPopupMenu.bi` / `.inc` | Vendored from [CMenuBar](https://github.com/PaulSquires/CMenuBar) — byte-identical |
-| `main.bas`, `frmMain.bi`, `frmMain.inc` | Demo harness |
+| `CComboBox.bi` | Declarations — types, callbacks, constants, function prototypes |
+| `CComboBox.inc` | Implementation |
+| `CPopupMenu.bi` | The floating list the control drops |
+| `CPopupMenu.inc` | Its implementation |
+| `CBufferPaint.bi` | The flicker-free drawing surface both controls paint through |
+| `CBufferPaint.inc` | Its implementation |
 
-`CComboBox.bi` includes **both** dependencies itself, so there is no include-order trap: two
-`#include once` lines and the type name are the whole adoption cost. A host that already
-vendors `CPopupMenu.bi` gets one copy — `#include once` dedupes by resolved path, which is how
-tiko already shares a single copy between `CTextBox` and `CMenuBar`.
-
-Build the demo:
+**AfxNova is required.** The control is built on `CWindow`, and `CBufferPaint` draws through
+`AfxNova\CGdiPlus.inc`. Sources include AfxNova relative to the workspace root
+(`#include once "AfxNova\CWindow.inc"`), so builds need the workspace root on the include path:
 
 ```bash
 fbc64.exe -i "C:\dev" main.bas
 ```
 
+**Include order.** `CComboBox.bi` includes **both** of its dependencies itself, so there is no
+declaration-order trap to fall into. The three implementation files are included in dependency
+order:
+
+```freebasic
+#include once "CBufferPaint.inc"
+#include once "CPopupMenu.inc"
+#include once "CComboBox.inc"
+```
+
+If your project already vendors `CPopupMenu`, you keep one copy: `#include once` dedupes by
+resolved path.
+
+**GDI+ must be running before the first repaint and must outlive the last one.** Both controls
+render their geometry through GDI+, so bracket your message loop:
+
+```freebasic
+dim as ULONG_PTR gdipToken = AfxGdipInit()
+' ... create windows, run the message loop ...
+AfxGdipShutdown( gdipToken )
+```
+
+`AfxGdipShutdown` must come after every window is destroyed, because each repaint builds and
+tears down a `CBufferPaint`.
+
+**Never name an identifier `ok`.** GDI+ defines `Ok = 0` as a `Status` enum value in namespace
+`AfxNova`, and hosts customarily say `using AfxNova`. An existing variable, parameter or
+function called `ok` becomes a duplicate definition the moment you adopt these files. Use `bOK`
+instead.
+
+### The message-pump contract — this one is mandatory
+
+**Call `CComboBox_FilterMessage` once per combobox, first, in your message pump.**
+
+```freebasic
+do while GetMessage( @uMsg, null, 0, 0 )
+    if uMsg.message = WM_QUIT then exit do
+
+    dim as boolean bEaten = false
+    for i as long = 0 to COMBO_COUNT - 1
+        if CComboBox_FilterMessage( ghCombo(i), @uMsg ) then
+            bEaten = true
+            exit for
+        end if
+    next
+    if bEaten then continue do
+
+    if IsDialogMessage( hWndForm, @uMsg ) = 0 then
+        TranslateMessage @uMsg
+        DispatchMessage @uMsg
+    end if
+loop
+```
+
+Each call returns FALSE immediately when that control's list is closed, so calling it for every
+combobox on the form costs nothing measurable.
+
+**What breaks without it.** The dropdown lives in `CPopupMenu`, and `CPopupMenu` puts its
+keyboard navigation and its outside-click dismissal in the filter. A host that never calls it
+gets a list that opens and paints correctly, and that can still be clicked, but that **cannot be
+driven from the keyboard and never dismisses when you click somewhere else**. Escape stops
+working too. The control notices when it is being run without the filter and degrades as
+sensibly as it can — a `WM_KEYDOWN` arriving while the list is open is swallowed rather than
+moving the selection behind a list still showing the old checkmark, and the button still opens
+and closes on alternate clicks — but there is no way to recover the navigation.
+
+**The one-shot reopen guard is the other half of that call.** `CPopupMenu`'s own filter dismisses
+the chain on an outside click and then returns FALSE *on purpose*, so the click still reaches
+whatever it landed on ("clicking a toolbar button while a menu is open both closes the menu and
+presses the button"). For a click on the combobox's **own button** that is exactly wrong: the
+list would close in the filter, and the `WM_LBUTTONDOWN` that follows would immediately reopen
+it — making the button impossible to close by clicking. So when the click is ours and the list is
+open, `CComboBox_FilterMessage` arms a one-shot flag which the very next `WM_LBUTTONDOWN` consumes
+and clears. It is deterministic: no timer, no close-time heuristic, and it cannot mis-fire,
+because the first down-click that sees it clears it unconditionally.
+
+### Focus and Tab
+
+**Call `IsDialogMessage` in your pump**, after the filter. The control is a tabstop, but only the
+dialog manager moves focus between tabstops. Without it you still get full mouse behaviour, and
+the arrow keys, F4, Space and Enter still work once the control has focus — only Tab navigation
+is lost.
+
+**Give something the focus at startup.** `IsDialogMessage` acts only when the focused window is
+already a descendant of the window you pass it. A real dialog does this in `WM_INITDIALOG`; an
+ordinary window must call `SetFocus` on its first control itself. Skip it and the first Tab does
+nothing, which is indistinguishable from the tabstops being broken.
+
 ---
 
 ## Quick start
 
-```basic
-ghCombo = CComboBox_Create( hWndParent, IDC_MYCOMBO )
-CComboBox_SetFont( ghCombo, ghFont(GUIFONT_10) )        ' borrowed; you keep ownership
-CComboBox_SetSelChangeCallback( ghCombo, @MySelChange )
+```freebasic
+' Create it. The control is created zero-sized and hidden.
+dim as HWND hCombo = CComboBox_Create( hWndParent, IDC_MYFORM_COMBO )
 
-CComboBox_AddItem( ghCombo, "Add to Existing Window", 1 )
-CComboBox_AddItem( ghCombo, "Open a New Window", 2 )
-CComboBox_SetCurSel( ghCombo, 0 )                      ' SILENT -- fires no callback
+' The font is BORROWED — you keep it and destroy it. It is also the measuring font, and it
+' is handed straight to the dropdown, so button and list can never disagree about widths.
+CComboBox_SetFont( hCombo, ghFont(GUIFONT_10) )
 
+' Be told when the user picks something.
+CComboBox_SetSelChangeCallback( hCombo, @MyCombo_SelChange )
+
+' Fill it. AddItem returns the new index; the third argument is a free-form host id.
+CComboBox_AddItem( hCombo, "Add to Existing Window", 1 )
+CComboBox_AddItem( hCombo, "Open a New Window", 2 )
+
+' Set the initial choice. This is silent — the callback above does not fire.
+CComboBox_SetCurSel( hCombo, 0 )
+
+' Ask how big it wants to be, then place it. GetIdealSize is valid immediately, before the
+' control has ever been sized.
 dim as long iw, ih
-CComboBox_GetIdealSize( ghCombo, iw, ih )              ' valid before it has ever been sized
-SetWindowPos( ghCombo, 0, x, y, iw, ih, SWP_NOZORDER )
-ShowWindow( ghCombo, SW_SHOW )
+CComboBox_GetIdealSize( hCombo, iw, ih )
+SetWindowPos( hCombo, 0, x, y, iw, ih, SWP_NOZORDER )
+
+ShowWindow( hCombo, SW_SHOW )
 ```
 
-…and **the pump contract, which is not optional**:
+And the callback:
 
-```basic
-do while GetMessage( @uMsg, null, 0, 0 )
-    if CComboBox_FilterMessage( ghCombo, @uMsg ) then continue do
-    if IsDialogMessage( hMain, @uMsg ) then continue do
-    TranslateMessage @uMsg : DispatchMessage @uMsg
-loop
+```freebasic
+sub MyCombo_SelChange( byval hCombo as HWND, byval idxOld as long, byval idxNew as long )
+    ' Fired only for user action: a pick from the list, or an arrow / Home / End key.
+    ' The control's state is already updated, so CComboBox_GetCurSel( hCombo ) = idxNew.
+    gConfig.OpenMode = CComboBox_GetItemID( hCombo, idxNew )
+end sub
 ```
 
-Call it once per combobox, **before** `IsDialogMessage`. Each call returns immediately when
-that control's list is closed, so a form with a dozen of them costs nothing.
-
-Without it the list opens and paints but cannot be keyboard-driven, never dismisses on an
-outside click, and clicking the button while it is open reopens it instead of closing it.
+That, plus the pump call from *Requirements*, is the whole minimum. Everything below is
+refinement.
 
 ---
 
-## The layout
+## Concepts
+
+### The handle is a real HWND
+
+`CComboBox_Create` returns an ordinary window handle, and every `CComboBox_*` function takes it.
+It is not an opaque type, so you can treat the control as the window it is — `SetWindowPos` to
+place and size it, `ShowWindow` to show it, `GetDlgItem` to find it by the `CtrlID` you passed at
+creation.
+
+### It is created zero-sized and hidden
+
+`CComboBox_Create` gives the control the styles `WS_CHILD`, `WS_TABSTOP`, `WS_CLIPSIBLINGS` and
+`WS_CLIPCHILDREN`, and **no extended style at all**. `WS_VISIBLE` is deliberately absent, so a
+newly created control shows nothing until you size it and call `ShowWindow`. That lets you build
+and configure a control before it is ever seen.
+
+The absent extended style is load-bearing rather than an omission: `WS_EX_CONTROLPARENT` would
+declare the control a *container*, and the dialog manager would descend into it looking for
+tabstops, find no children, and skip it — Tab would never land on the combobox.
+
+### Two windows, one of them not a child
+
+The button is the control. The **dropdown is a separate top-level `WS_POPUP` window**, a
+`CPopupMenu` owned by your top-level frame rather than parented to the combobox. It is created
+lazily on the first open (or on the first call to `CComboBox_EnsureList`,
+`CComboBox_SetListColors` or `CComboBox_SetListItemHeight`) and destroyed with the control — so a
+form with a dozen comboboxes on tabs the user never visits does not create a dozen popup windows
+at startup.
+
+Because it is a popup and not a child, it is not a tab target, and it never takes activation.
+
+### The rows are rebuilt from your items on every open
+
+Nothing incremental happens between the model and the list: every `CComboBox_DropDown` clears the
+popup and refills it from the item array, so the two cannot drift. The row ids handed to
+`CPopupMenu` are `(model index + 1)` — never your item's `id` field, which stays a free-form
+payload and never enters the command stream.
+
+That rebuild is also why `CComboBox_GetListHandle` is for appearance only, and why the opening
+edge of `DropDownCallback` is the right place to rebuild a dynamic list.
+
+### Geometry is derived, never assigned
+
+The control computes four rectangles and owns all four. You influence them through the layout
+setters; you never write them.
+
+| Rect | What it is |
+|---|---|
+| `rcButton` | The chrome: the client area deflated by the focus-ring band |
+| `rcText` | The caption box. **Empty** in arrow-only mode |
+| `rcChevron` | The cell the stacked up/down chevron is drawn in |
+| `rcVisual` | `rcButton` inflated by the focus-ring band |
+
+The formulas, if you need to predict them:
 
 ```
-ringPad  = nFocusGap + nFocusThick        reserved ALWAYS, focused or not
-textW    = MAX over items of the measured caption width   (0 in arrow-only mode)
-contentH = max( textH, nChevronHeight )
+  ringPad   = focusGap + focusThickness
+  textW     = MAX over all items of the measured caption width  (0 when no caption is drawn)
+  textH     = GetTextMetrics.tmHeight       ONE height for the whole control
+  contentH  = max( textH, chevronHeight )
 
-idealW   = 2*ringPad + nPadLeft + [textW + nTextGap] + nChevronWidth + nPadRight
-idealH   = 2*ringPad + nPadTop  + contentH + nPadBottom
+  idealW    = 2*ringPad + padLeft + [textW + textGap] + chevronWidth + padRight
+  idealH    = 2*ringPad + padTop  + contentH + padBottom
 
-rcButton  = rcClient deflated by ringPad
-rcChevron = right-aligned inside rcButton at nPadRight, v-centred
-rcText    = rcButton.left+nPadLeft .. rcChevron.left-nTextGap, v-centred   (empty if arrow-only)
-rcVisual  = rcButton inflated by ringPad   ( = rcClient when sized ideally )
+  rcButton  = rcClient deflated by ringPad on all four sides
+  rcChevron = right-aligned inside rcButton at padRight, v-centred, chevronWidth wide
+  rcText    = from rcButton.left + padLeft to rcChevron.left - textGap, v-centred on textH
+  rcVisual  = rcButton inflated by ringPad  ( = rcClient when you sized the control ideally )
 ```
 
-**The width comes from the widest item, never the selected one.** A combobox that grew and
-shrank as the user picked would reflow whatever surrounds it and drag its own dropdown anchor
-sideways. The placeholder is deliberately not measured either, for the same reason — the button
-is exactly as wide before the first pick as after it.
+The `[textW + textGap]` term is spent **only when a caption is drawn**. In arrow-only mode there
+is nothing on the left for the chevron to be separated from, so charging for the gap would leave
+the arrow visibly off-centre in its own padding.
 
-`GetIdealSize` is valid **before the control has ever been sized**, because the measuring pass
-runs ahead of the zero-client bail. That matters: a host calls it to decide how big to make the
-control in the first place.
+Layout is lazy. A setter marks the layout stale and asks for a repaint; the next paint — or any
+rect query, size query or auto-size pass — recomputes it. There is no begin-update / end-update
+pair to remember, and adding forty items in a row costs one measuring pass, not forty.
 
-All setters take **raw pixels** — the caller DPI-scales. Only the Create-time defaults are
-scaled for you. `nBorderThick` and `nFocusThick` are not scaled anywhere: a hairline stays a
-hairline. `nChevronThick` is the one exception, because `CBufferPaint.PaintLine` scales the pen
-it is handed — deliberate, since a glyph's stroke should grow with the glyph.
+### The width comes from the widest item, never the selected one
 
-`SetCornerCurvature` takes an ellipse **diameter**, not a radius: `CBufferPaint` keeps GDI's
-vocabulary and halves it internally. 12 draws a 6px radius; 0 gives square corners.
+This is the rule the whole layout is built around. The button must not change width when the
+selection changes: a combobox that grows and shrinks as the user picks reflows whatever surrounds
+it and drags its own dropdown anchor sideways.
 
-### Text modes
+So every caption is measured and the widest wins. The **placeholder is deliberately not
+measured** — a long one cannot inflate the button and a short one cannot let it shrink, either of
+which would make the button resize on the user's very first pick.
 
-`CComboBox_SetTextMode` picks one of three:
+The one place the width *does* move is the `-1` ↔ selected boundary under
+`CBO_TEXT_WHENSELECTED`, which is that mode's whole purpose rather than an exception: every
+*selected* state still has the same width as every other. See the mode's entry in *Constants*.
 
-| Mode | Button shows | Width |
-|---|---|---|
-| `CBO_TEXT_ALWAYS` *(default)* | always the caption (or the placeholder, or nothing) | fixed, from the widest item |
-| `CBO_TEXT_NEVER` | only the chevron, permanently | fixed, padding + chevron |
-| `CBO_TEXT_WHENSELECTED` | only the chevron while nothing is selected; the caption once something is | **moves once**, on the `-1` ↔ selected boundary |
+### The ideal size is valid before the control has ever been sized
 
-`CBO_TEXT_WHENSELECTED` is the "don't answer for me" shape: a combobox that starts as a bare
-pair of arrows and becomes an ordinary captioned combobox the moment the user picks something.
+`CComboBox_GetIdealSize` is what you call to decide how big to make the control in the first
+place, so it must not need the control to already have a size. The measuring pass runs *ahead of*
+the layout's zero-client bail, which is what makes that work. The rect queries are the other way
+round — they describe placement, so they return FALSE until the control has a client area.
 
-**It is the only mode whose width moves, and that is not a contradiction of the widest-item
-rule** — that rule exists so the button doesn't resize as the user picks *different* items, and
-it still holds: every selected state has the same width. What changes is the one-time
-transition from unanswered to answered, which is the point of the mode.
+### Pixels, and who scales them
 
-So in this mode, **either turn on `SetAutoSize(true)` or re-place the control from your
-`SelChange` handler.** Left at a fixed size the control keeps its collapsed width and the
-caption arrives ellipsized into a chevron-sized box — the self-test asserts exactly that,
-because it's a real cost and not a bug. `SelChange` fires *after* the new ideal width is
-computed, so a handler that calls `GetIdealSize` sees the new value.
+Only the creation-time defaults are DPI-scaled for you:
 
-A **placeholder can never appear** in this mode: the only state that would show one is the
-collapsed, caption-less state. Setting both isn't an error, just inert.
+| Setting | Default | DPI-scaled at create? |
+|---|---:|---|
+| Padding left / right | 12 / 10 | Yes |
+| Padding top / bottom | 6 / 6 | Yes |
+| Text gap | 8 | Yes |
+| Chevron width / height | 9 / 12 | Yes |
+| Chevron gap | 3 | Yes |
+| Corner curvature | 12 | Yes |
+| Focus-ring gap | 2 | Yes |
+| Border thickness | 1 | **No** |
+| Focus-ring thickness | 1 | **No** |
+| Chevron thickness | 1 | **No** — but see below |
 
-`SetShowText(bool)` is the two-state convenience (`TRUE` → `ALWAYS`, `FALSE` → `NEVER`); it
-cannot reach `WHENSELECTED`. `GetShowText` answers **"is a caption drawn right now"**, which
-for `WHENSELECTED` depends on the selection — deliberately not an echo of the mode.
+Every setter afterwards takes raw pixels and expects **you** to scale — typically
+`pWindow->ScaleX(...)` / `ScaleY(...)`.
 
-Paint callbacks get `isTextVisible` in `CCOMBOBOX_PAINTINFO` so they never have to re-derive
-it; when it's false, `rcText` is empty.
+The border and focus-ring thicknesses should not be scaled at all: a hairline should stay a
+hairline at any DPI. **The chevron thickness is the deliberate exception**: it is not scaled at
+creation, but `CBufferPaint.PaintLine` scales the pen width it is handed, so the chevron's stroke
+*does* grow on a high-DPI display. A rule is a hairline; a glyph's stroke should grow with the
+glyph.
 
-### Auto-size
+### Programmatic changes are silent — with one deliberate exception
 
-`CComboBox_SetAutoSize(true)` makes the control `SetWindowPos` **itself** (preserving its
-top-left) whenever something that changes the ideal width changes — items, font, show-text,
-padding, chevron size, focus ring. It is **off by default**, which is the strict family rule:
-the host measures with `GetIdealSize` and sizes.
+`CComboBox_SetCurSel` never fires the selection callback. `SelChangeCallback` reports **user**
+action — a pick from the list, or an arrow / Home / End key — and nothing else. This follows
+Win32's own `CB_SETCURSEL` / `CBN_SELCHANGE` split, and it means you can safely call
+`CComboBox_SetCurSel` from inside your own handler without recursing. Every item mutator
+(`AddItem`, `InsertItem`, `DeleteItem`, `Clear`, and all the `SetItem*` setters) is silent too.
 
-The control owns its size in that mode; the host still owns its position. A right-aligned
-combobox therefore still needs a re-place after items change. The demo does exactly this and
-prints as it goes.
+**`DropDownCallback` is the exception, and it is not an oversight.** It fires for
+`CComboBox_DropDown` and `CComboBox_CloseUp` as well as for user opens, because it reports a
+*window-state transition* rather than a value change — and a host that rebuilds its item set on
+open needs that hook to run however the list was opened.
 
----
+### How a click is decided
 
-## The dropdown is a CPopupMenu, used as-is
+**The list opens on the button-DOWN**, not on the release. Pressing the left button focuses the
+control (unconditionally, even if you go on to suppress the click from a message callback), then
+opens or closes the list.
 
-That buys the whole floating-window problem already solved: a `WS_POPUP` that never takes
-activation, hover-is-selection, keyboard navigation, `Escape`, outside-click dismissal, and a
-checkmark per row.
+**No mouse capture is taken, anywhere.** Take capture only if something consumes the guaranteed
+`WM_LBUTTONDOWN` → `WM_LBUTTONUP` pairing, and here nothing does: from the instant of the down,
+the popup owns the interaction. So there is no press/cancel gesture to protect, no
+`WM_CAPTURECHANGED` handling, and — unlike the controls that do take capture — a message
+callback's return value **is** honoured for `WM_LBUTTONUP`.
 
-**Two consequences follow, and neither is a bug:**
+### Keyboard handling follows Win32's combobox
 
-1. **The checkmark sits in a left gutter.** `CPopupMenu`'s `nCheckColWidth` (30) and
-   `nChevronColWidth` (20) are fixed at its Create with no setters, so rows render as a Windows
-   menu — check on the left, and a reserved-but-unused column on the right. A right-aligned
-   check would mean patching CMenuBar, which was ruled out.
-2. **There is no scrolling.** `CPopupMenu` bottom-clamps to the work area; a list taller than
-   the screen is **clipped and its tail is unreachable**. This control is built for about a
-   dozen items, not fifty. A long list needs a different control.
-
-Rows are **rebuilt from the model on every open**, so the two cannot drift. The row id is
-`(model index + 1)` — not the item's own `id`, which stays a free-form host payload and never
-enters the command stream. That is the id-collision trap recorded in `Learnings.md` under
-*"Replacing TrackPopupMenu with CPopupMenu"*, avoided by construction.
-
-The dropdown's appearance is reachable through `CComboBox_GetListHandle()`, so every
-`CPopupMenu_Set*` appearance call is available. **That handle is for appearance only** —
-adding, deleting or re-ordering rows through it desyncs them from the model and they vanish at
-the next open.
-
-Its colours are **derived from `CCOMBOBOX_COLORS`** automatically, so theming the button themes
-the list. Calling `CComboBox_SetListColors` claims them permanently and the derivation stands
-down — an explicit choice is never overwritten.
-
----
-
-## Colours
-
-Four moods: `idle`, `hot`, `open`, `disabled`, each with a back, fore, border and chevron
-colour, plus `ForeColorPlaceholder` and `FocusRingColor`.
-
-There is deliberately **no pressed state**: the list opens on mouse-*down*, so "pressed" and
-"open" are the same instant. Precedence is `disabled > open > hot > idle` — **open beats hot**,
-because while the list is up the cursor is normally over the *list*, and the button must stay
-lit.
-
-Out of the box the button reads **borderless** (every `BorderColorXxx` defaults equal to the
-matching `BackColorXxx`) and the chevron **follows the caption** (every `ChevronColorXxx`
-defaults equal to the matching `ForeColorXxx`) — which is what the reference design shows:
-caption and chevron turn blue together while the list is open, and the fill does not change.
-Set the fields to break either coupling.
-
-Read-modify-write is `GetColors`, assign, `SetColors`.
-
----
-
-## Focus and keyboard
-
-`WS_TABSTOP`, real focus tracking, a painted focus ring. `CToggle`, `CNumericUpDown` and
-`CButton` are the other focusable controls in the family. Tab *navigation* needs
-`IsDialogMessage` in the host pump; mouse and — once the control has focus — keyboard both work
-without it.
-
-**Give one of your controls the focus at startup.** `IsDialogMessage` only acts when the focused
-window is a *descendant* of the window you pass it, and when your form opens the focus is on the
-form itself — so the **first Tab does nothing**, which reads exactly like broken tabstops. A real
-dialog does this in `WM_INITDIALOG`; an ordinary `CWindow` host calls `SetFocus( hFirstControl )`
-after `ShowWindow`.
-
-> **Fixed 2026-07-23 — Tab navigation never actually reached a combobox before that.**
-> `CWindow.Create` defaults its `dwExStyle` parameter to
-> `WS_EX_CONTROLPARENT OR WS_EX_WINDOWEDGE`, and `CComboBox_Create` passed only `dwStyle` — so
-> the control declared itself a *container*, the dialog manager descended into it looking for
-> tabstops, found no children, and skipped it. **This repo's own demo hid it**: the demo also
-> hosts three plain Win32 `BUTTON`s, so Tab moved between *those* and the interactive pass saw
-> focus moving and concluded navigation worked. Now passed explicitly as `0`, asserted three ways
-> in the self-test, and confirmed by an interactive pass that specifically watched Tab land on a
-> combobox rather than merely move. Note this fix is **wrong** for
-> `CListBox`/`CTextBox`/`CNumericUpDown`/`CScrollPanel`, which genuinely need the flag; see
-> `C:\dev\Learnings.md`.
-
-`WM_GETDLGCODE` claims `DLGC_WANTALLKEYS` **per-message and only for the keys the control
-consumes**. Claiming unconditionally would swallow Tab and break the navigation the tabstop
-opted into; claiming nothing would let `IsDialogMessage` route Enter to the dialog's default
-button first.
-
-With the list **closed** — Win32 combobox rules:
+With the list **closed**:
 
 | Key | Effect |
 |---|---|
-| `Down` / `Up` | move the selection in place, **without** opening. Fires `SelChange`. |
-| `Home` / `End` | first / last **enabled** item. Fires `SelChange`. |
-| `Alt+Down`, `Alt+Up`, `F4`, `Space`, `Enter` | open the list |
+| Down / Up | Move the selection in place, without opening. Fires `SelChangeCallback` |
+| Home / End | Jump to the first / last selectable item. Fires `SelChangeCallback` |
+| Alt+Down, Alt+Up | Open the list |
+| F4, Space, Enter | Open the list |
 
-Arrow movement **clamps, it does not wrap** — a wrapping `Down` at the last item would jump the
-user back to the first with no list visible to explain it. Disabled items are skipped.
+Arrow movement **clamps at the ends, it does not wrap**: a wrapping Down at the last item would
+jump the user back to the first with no list visible to explain it. Disabled items are skipped.
+From "nothing selected", Up lands on the last selectable item — the only sensible answer when
+there is no current position to step back from.
 
-With the list **open** the keyboard belongs to `CPopupMenu`'s filter.
+With the list **open**, the keyboard belongs to `CPopupMenu`'s filter, which is one more reason
+the pump call matters. Note that `CPopupMenu`'s own arrow navigation *wraps* — a menu convention,
+and deliberately different from the closed-list behaviour above.
+
+The control answers `WM_GETDLGCODE` with `DLGC_WANTALLKEYS` only for Up, Down, Home, End, F4,
+Space and Enter, and only when the dialog manager is asking about one specific message. Claiming
+keys unconditionally would swallow Tab and break the very navigation the control opted into by
+being a tabstop; claiming nothing would let `IsDialogMessage` route Enter to your dialog's default
+button before the control ever saw it.
+
+### Enabling and disabling is real, not cosmetic
+
+`CComboBox_SetEnabled` calls `EnableWindow`. A disabled window receives no mouse input at all and
+the dialog manager's Tab skips it, so there is no way for a click or a keystroke to get past a
+cosmetic check. If you call `EnableWindow` on the control directly, the control notices and greys
+itself, so the two routes cannot disagree. Disabling also closes an open list and clears hover
+immediately rather than waiting for the next mouse move.
+
+Disabling does **not** change the selection. A disabled combobox still reads as showing its
+value, which is why the colour struct carries a full disabled set.
+
+### Hover is polled as well as tracked
+
+`WM_MOUSELEAVE` is not reliably delivered when the cursor exits quickly, or onto another control,
+which would strand the button painted hot. While the cursor is over the control a 100 ms timer
+runs as a safety net and clears the hover state itself. The same tick is where a list that was
+closed behind the control's back gets noticed — see the one-chain rule in *Behaviour and limits*.
+
+### Lifetime
+
+The control frees itself when its window is destroyed, and destroys its dropdown with it. The
+font you pass in stays yours: it is borrowed, never owned, so keep it alive for as long as the
+control lives and destroy it yourself afterwards.
+
+---
+
+## Behaviour and limits
+
+Firm properties of the control, not settings:
+
+- **The dropdown does not scroll. This is a dozen-item control, not a fifty-item one.**
+  `CPopupMenu` clamps to the monitor work area, so a list taller than the work area is **clipped
+  and its tail is unreachable** — there is no scrollbar, no wheel scrolling and no keyboard route
+  to the hidden rows. If your list can grow past a screenful, this is the wrong control.
+- **The checkmark sits in a fixed left gutter.** `CPopupMenu` reserves a 30px check column on the
+  left of every row and a 20px column on the right, with no setters for either, so rows read like
+  a Windows menu — check on the left, and a reserved-but-unused column on the right — rather than
+  as a right-aligned tick.
+- **Only one popup chain can be open at a time.** Opening combobox B while combobox A's list is up
+  closes A's list *silently*: A is never told, and its `DropDown(false)` callback is deferred to
+  the next non-paint touch of A (a mouse move, a focus change, its hover tick, or any state
+  query). A's painted state is corrected immediately; only the callback is late. Host callbacks
+  are never run from inside `WM_PAINT`, which is what forces that deferral.
+- **`CComboBox_DropDown` fails on an empty list.** With no items there is nothing to show, so it
+  returns FALSE. It fires the opening callback first and then a matching closing one, so the
+  callback's open/close pairing always holds even when the open fails.
+- **Double-clicks are not special.** `CS_DBLCLKS` is deliberately off, so a rapid second click
+  arrives as an ordinary down/up pair. That is what you want here: on this control a rapid second
+  click is a legitimate close-then-reopen, and with `CS_DBLCLKS` on it would arrive as
+  `WM_LBUTTONDBLCLK` and be silently dropped.
+- **No mouse capture is taken.** See *How a click is decided*.
+- **No tooltip support.** There is no tooltip callback and no tooltip window is created. If you
+  want a tip, add your own tool over the control's `HWND`.
+- **No text entry.** There is no editable variant and no `CBS_DROPDOWN` equivalent.
+- **No multi-select**, and no per-item icons or images.
+- **No hit-test function.** The entire client rectangle opens the list, so a hit test could only
+  ever return TRUE for points the caller already knows are inside.
+- **Arrow keys clamp, they do not wrap** — while the list is closed. The open list, being a
+  `CPopupMenu`, wraps.
+- **The right mouse button is reported, never acted on.** A context menu is your business.
+- **`CComboBox_GetListHandle` is for appearance only.** Adding, deleting or re-ordering rows
+  through it is not supported: the rows are rebuilt from your items on every open, so your changes
+  vanish at the next open at best. The checkmark is placed by the control from its own selection.
+- **Invalid text-mode values are ignored**, leaving the current mode in place, rather than laying
+  the button out somewhere unexpected.
+- **When the control is too narrow, `rcText` collapses and the chevron survives.** Rects are
+  computed honestly rather than squeezed: the chevron keeps its size and stays pinned to the
+  right, and the caption box degenerates to an empty rect rather than a negative one. So a
+  too-narrow combobox loses its caption and keeps its arrow, which is the useful failure.
+- **`CComboBox_FindItemByText` compares through a 1024-character buffer**, so captions longer than
+  1023 characters are compared on their first 1023 characters only.
+
+---
+
+## API reference
+
+### Creation
+
+| Function | Description |
+|---|---|
+| `CComboBox_Create( hWndParent, CtrlID ) as HWND` | Creates the control as a child of `hWndParent` and returns its window handle. `CtrlID` becomes the window's `GWLP_ID`, so `GetDlgItem` finds it. Created zero-sized and hidden — size it with `CComboBox_GetIdealSize`, place it with `SetWindowPos`, then `ShowWindow`. No extended style is applied, deliberately. |
+
+### Items
+
+The set is dynamic, and every structural mutation fixes up the current selection. **All of these
+are silent** — no callbacks, no notifications.
+
+| Function | Description |
+|---|---|
+| `CComboBox_AddItem( hCombo, Text, id = 0, itemData = 0 ) as long` | Appends an item and returns its index, or -1 on failure. Cannot move an existing index, so the selection is untouched. It does **not** auto-select the first item — -1 is a legal state here. `id` and `itemData` are free-form host payloads; `id` never enters the command stream. |
+| `CComboBox_InsertItem( hCombo, idx, Text, id = 0, itemData = 0 ) as long` | Inserts **before** `idx`, shifting the tail up. `idx` equal to the count appends. Returns `idx`, or -1 for an out-of-range index. A selection at or after `idx` moves up by one. |
+| `CComboBox_DeleteItem( hCombo, idx ) as boolean` | Removes one item. Deleting the **current** item clears the selection to -1 rather than sliding it onto a neighbour; a selection after `idx` moves down by one. FALSE for an invalid index. |
+| `CComboBox_Clear( hCombo )` | Removes everything and clears the selection to -1. |
+| `CComboBox_GetCount( hCombo ) as long` | Number of items. |
+| `CComboBox_IsValidItem( hCombo, idx ) as boolean` | TRUE when `idx` is in range. |
+| `CComboBox_GetItemText( hCombo, idx ) as DWSTRING` | The item's caption, or `""` for an invalid index. |
+| `CComboBox_SetItemText( hCombo, idx, Text ) as boolean` | Sets the caption and **re-measures**, so this can change the button's ideal width — and, with auto-size on, the button itself. FALSE for an invalid index. |
+| `CComboBox_GetItemID( hCombo, idx ) as long` | The host id, or 0 for an invalid index. |
+| `CComboBox_SetItemID( hCombo, idx, id ) as boolean` | Sets the host id. No repaint — nothing draws it. |
+| `CComboBox_GetItemData( hCombo, idx ) as integer` | The host payload, or 0 for an invalid index. |
+| `CComboBox_SetItemData( hCombo, idx, itemData ) as boolean` | Sets the host payload. No repaint. |
+| `CComboBox_GetItemEnabled( hCombo, idx ) as boolean` | The item's enabled state. |
+| `CComboBox_SetItemEnabled( hCombo, idx, bEnabled ) as boolean` | A disabled item is greyed in the list, is not selectable by mouse or keyboard, and is skipped by the arrow keys — but it still counts for indexing and **still contributes its width**. **Disabling the current item clears the selection to -1**, because the user could not restore it once they moved off (and `SetCurSel` refuses to put it back). |
+| `CComboBox_FindItemByID( hCombo, id ) as long` | Index of the **first** item carrying this id, or -1. |
+| `CComboBox_FindItemByText( hCombo, Text ) as long` | Index of the **first** item with this exact caption, case-insensitively, or -1. Compared through a 1024-character buffer. |
+
+### Selection and state
+
+| Function | Description |
+|---|---|
+| `CComboBox_GetCurSel( hCombo ) as long` | The selected model index, or -1 for nothing selected. |
+| `CComboBox_SetCurSel( hCombo, idx ) as boolean` | Sets the selection and repaints. **Silent** — does not fire `SelChangeCallback`. **Refuses a disabled item** (returns FALSE, changes nothing): the user could not have reached that state. `-1` always succeeds; an out-of-range index does not. Returns TRUE when the selection already matched. No re-measure — the width comes from the widest item, not the selected one. |
+| `CComboBox_GetText( hCombo ) as DWSTRING` | What the **button** is currently showing: the selected caption, or the placeholder, or `""`. |
+| `CComboBox_GetEnabled( hCombo ) as boolean` | The control's enabled state. |
+| `CComboBox_SetEnabled( hCombo, isEnabled )` | Enables or disables through `EnableWindow`, so input really stops. Disabling closes an open list and clears hover at once. Does not change the selection. |
+| `CComboBox_GetFocused( hCombo ) as boolean` | TRUE while the control has keyboard focus and is painting its focus ring. |
+| `CComboBox_Refresh( hCombo )` | Marks the layout stale and requests a repaint with background erase. Rarely needed — every setter does this for you. |
+
+### The dropdown
+
+| Function | Description |
+|---|---|
+| `CComboBox_IsDroppedDown( hCombo ) as boolean` | TRUE while the list is showing. It first re-syncs against the popup's real state, so it can fire a pending `DropDown(false)` callback as a side effect — see the one-chain rule in *Behaviour and limits*. |
+| `CComboBox_DropDown( hCombo ) as boolean` | Opens the list. Returns TRUE if it is open (including when it already was), FALSE if the control is disabled, the item set is **empty**, or the popup could not be shown. The order is guaranteed: the `DropDown(true)` callback fires **first, before a single row is built** — then the rows are rebuilt from your items, the font is re-handed over, the list is widened to at least the button's width, the current row is preselected so keyboard navigation starts where the user is, and the popup is shown below the button chrome with left edges aligned and the borders merged. If it bails after the first step, a matching `DropDown(false)` is fired so the pairing always holds. |
+| `CComboBox_CloseUp( hCombo )` | Closes the list and fires `DropDown(false)` if it was open. Silent when it was already closed. |
+| `CComboBox_FilterMessage( hCombo, pMsg ) as boolean` | **The mandatory pump hook.** Returns TRUE when the message was consumed and your pump must skip Translate/Dispatch. Returns FALSE immediately when this control's list is closed, so calling it per combobox is cheap. It also arms the one-shot reopen guard described in *Requirements*. Safe to call with a stale handle. |
+| `CComboBox_EnsureList( hCombo ) as HWND` | Creates the dropdown window now instead of on the first open, and returns its handle (0 on failure). Only needed when you want to reach the popup through `CComboBox_GetListHandle` **before** the user has ever opened it — `CComboBox_SetListColors` and `CComboBox_SetListItemHeight` call it for you. |
+
+### Geometry and layout
+
+All setters take **raw pixels**; you do the DPI scaling. Each requests a repaint, and — when the
+change can move the ideal width — re-applies auto-size if you turned it on.
+
+| Function | Description |
+|---|---|
+| `CComboBox_GetTextMode( hCombo ) as long` | `CBO_TEXT_ALWAYS` (the default), `CBO_TEXT_NEVER` or `CBO_TEXT_WHENSELECTED`. |
+| `CComboBox_SetTextMode( hCombo, nTextMode )` | Sets the mode. Values outside the three constants are **ignored**. See *Constants* for what each means and for the width consequence of the third. |
+| `CComboBox_GetShowText( hCombo ) as boolean` | Answers "**is a caption drawn right now**", not "what mode is set" — under `CBO_TEXT_WHENSELECTED` those are different questions, and this is the one a caller can use. |
+| `CComboBox_SetShowText( hCombo, bShowText )` | The two-state convenience over `SetTextMode`: TRUE = `CBO_TEXT_ALWAYS`, FALSE = `CBO_TEXT_NEVER`. It cannot reach `CBO_TEXT_WHENSELECTED` — that mode has no boolean spelling, which is why the enum exists. |
+| `CComboBox_GetAutoSize( hCombo ) as boolean` | Whether the control sizes itself. |
+| `CComboBox_SetAutoSize( hCombo, bAutoSize )` | When TRUE the control `SetWindowPos`es **itself** to its ideal size, preserving its top-left, whenever something that changes that size changes: items, item text, font, text mode, padding, text gap, chevron size, focus ring. Default FALSE — normally the host measures with `GetIdealSize` and sizes. Turning it on applies immediately. **The control owns its size; you still own its position**, so a control that grows in place must be re-placed by you if it is right-aligned. |
+| `CComboBox_GetPadding( hCombo, byref nLeft, nTop, nRight, nBottom )` | The four inner paddings, inside the chrome. |
+| `CComboBox_SetPadding( hCombo, nLeft, nTop, nRight, nBottom )` | Sets them; each clamped to a minimum of 0. Changes the ideal size. |
+| `CComboBox_GetTextGap( hCombo ) as long` | The gap between the caption and the chevron. |
+| `CComboBox_SetTextGap( hCombo, nTextGap )` | Sets it; clamped to a minimum of 0. **Spent only when a caption is drawn** — in arrow-only mode it is not charged at all. |
+| `CComboBox_GetChevronSize( hCombo, byref nWidth, nHeight )` | The chevron cell's size. |
+| `CComboBox_SetChevronSize( hCombo, nWidth, nHeight )` | Sets it; **clamped to a minimum of 2×2**, below which the arms degenerate and the painter would draw a stray bar instead of a chevron. Changes the ideal size. |
+| `CComboBox_GetChevronGap( hCombo ) as long` | The vertical air between the up chevron and the down chevron. |
+| `CComboBox_SetChevronGap( hCombo, nGap )` | Sets it; clamped to a minimum of 0. It lives **inside** the chevron cell, so it changes the two arms' height and never the control's ideal size — repaint only, no re-layout. |
+| `CComboBox_GetChevronThickness( hCombo ) as long` | The chevron's stroke weight. |
+| `CComboBox_SetChevronThickness( hCombo, nThickness )` | Sets it; clamped to a minimum of 1. Repaint only — the arms are drawn inside the cell, so nothing moves. **This is the one thickness that is DPI-scaled**, at paint time, by `CBufferPaint.PaintLine`. |
+| `CComboBox_GetCornerCurvature( hCombo ) as long` | The chrome's corner curvature. |
+| `CComboBox_SetCornerCurvature( hCombo, nCurvature )` | Sets it; clamped to a minimum of 0, where **0 means square corners**. This is an ellipse **diameter**, not a radius — `CBufferPaint` keeps GDI's vocabulary and halves it internally, so 12 draws a 6px radius. Repaint only. |
+| `CComboBox_GetBorderThickness( hCombo ) as long` | The chrome's border thickness. |
+| `CComboBox_SetBorderThickness( hCombo, nThickness )` | Sets it; clamped to a minimum of 0, where **0 means no border at all** (the chrome is then a plain filled rounded rect). Repaint only — the border is drawn inside the chrome. Do not DPI-scale this value. |
+| `CComboBox_GetFocusRing( hCombo, byref nGap, nThickness )` | The gap from the chrome to the focus ring, and the ring's own thickness. |
+| `CComboBox_SetFocusRing( hCombo, nGap, nThickness )` | Sets both; each clamped to a minimum of 0. **Both change the ideal size**, because the ring's band is reserved whether or not the control has focus — which is what stops the button jumping sideways when you Tab onto it. Do not DPI-scale the thickness. |
+| `CComboBox_GetIdealSize( hCombo, byref nWidth, nHeight )` | The measured button size: chrome plus the focus-ring band on every side. Forces a pending layout, and is **valid before the control has ever been sized**. |
+| `CComboBox_GetButtonRect( hCombo, byref rc ) as boolean` | The chrome, in client coordinates. |
+| `CComboBox_GetTextRect( hCombo, byref rc ) as boolean` | The caption box. Returns TRUE with an **empty** rect in arrow-only mode — empty is the honest answer, and reporting failure would conflate "no caption" with "not sized yet". |
+| `CComboBox_GetChevronRect( hCombo, byref rc ) as boolean` | The chevron cell. |
+| `CComboBox_GetVisualRect( hCombo, byref rc ) as boolean` | The chrome inflated by the focus-ring band. |
+
+The four rect queries force any pending layout first, so their results are always current. Each
+returns FALSE — leaving `rc` empty — when the control has no client area yet, which is the case
+between `CComboBox_Create` and the first `SetWindowPos`.
+
+### Appearance
+
+| Function | Description |
+|---|---|
+| `CComboBox_GetColors( hCombo, pColors as CCOMBOBOX_COLORS ptr )` | Fills your struct with the control's current colours. |
+| `CComboBox_SetColors( hCombo, pColors as CCOMBOBOX_COLORS ptr )` | Copies the whole struct in and repaints with background erase. **Also re-derives the dropdown's colours** from it — unless you have claimed them with `CComboBox_SetListColors`. |
+| `CComboBox_GetFont( hCombo ) as HFONT` | The font you handed in, or 0. |
+| `CComboBox_SetFont( hCombo, hTextFont )` | Sets the font and re-measures. **Borrowed, never owned** — keep it alive and destroy it yourself. It is also the measuring font *and* it is passed straight to the dropdown, so button and list always agree about widths. A paint callback must draw with this same font, or the measured width lies. |
+| `CComboBox_GetPlaceholderText( hCombo ) as DWSTRING` | The placeholder string, or `""`. |
+| `CComboBox_SetPlaceholderText( hCombo, Text )` | The string drawn when nothing is selected; `""` draws nothing. Repaint only — the placeholder is **never measured** and can never change the width. |
+| `CComboBox_GetListHandle( hCombo ) as HWND` | The dropdown's `CPopupMenu` handle, or **0 until the list has been created** (which happens on the first open, or on `CComboBox_EnsureList`). **Appearance only** — every `CPopupMenu_Set*` appearance call is available through it, but adding, deleting or re-ordering rows is not supported: the rows are rebuilt from your items on every open and your changes vanish. The checkmark is placed by the control. |
+| `CComboBox_SetListColors( hCombo, pColors as CPOPUPMENU_COLORS ptr )` | Sets the dropdown's colours directly, creating the list if needed. **This claims them permanently**: from here on `CComboBox_SetColors` will not re-derive them, so an explicit choice is never overwritten by a later theme change. |
+| `CComboBox_SetListItemHeight( hCombo, nItemHeight )` | Sets the dropdown's row height, creating the list if needed. |
+
+To change one colour, read-modify-write:
+
+```freebasic
+dim as CCOMBOBOX_COLORS clrs
+CComboBox_GetColors( hCombo, @clrs )
+clrs.BorderColor    = BGR( 80, 86, 96)
+clrs.BorderColorHot = BGR(110,118,130)
+CComboBox_SetColors( hCombo, @clrs )
+```
+
+### Callback registration
+
+| Function | Description |
+|---|---|
+| `CComboBox_SetPaintCallback( hCombo, usersub )` | Installs a renderer that draws the whole **button** instead of the built-in painter. Repaints. The dropdown is painted by `CPopupMenu` — reach that through `CComboBox_GetListHandle`. |
+| `CComboBox_SetMessageCallback( hCombo, userfunc )` | Installs an observer for mouse, focus and key messages. |
+| `CComboBox_SetSelChangeCallback( hCombo, usersub )` | Installs the handler told when the **user** changes the selection. |
+| `CComboBox_SetDropDownCallback( hCombo, usersub )` | Installs the handler told when the list opens or closes — **including programmatically**. |
+
+All four are optional and independent.
+
+---
+
+## Colors
+
+The colour surface is one flat struct, `CCOMBOBOX_COLORS`, with eighteen `COLORREF` fields: four
+drawn parts (background, caption, border, chevron) × four moods (idle, hot, open, disabled), plus
+the placeholder colour and the focus ring. Every field ships with a usable dark-theme default, so
+a control you never call `CComboBox_SetColors` on still looks right.
+
+| Field | Paints |
+|---|---|
+| `BackColor` | Chrome fill, idle |
+| `ForeColor` | Caption, idle |
+| `BorderColor` | Chrome border, idle |
+| `ChevronColor` | Chevron strokes, idle |
+| `BackColorHot` | Chrome fill, cursor over the button with the list closed |
+| `ForeColorHot` | Caption, hot |
+| `BorderColorHot` | Chrome border, hot |
+| `ChevronColorHot` | Chevron strokes, hot |
+| `BackColorOpen` | Chrome fill while the list is dropped |
+| `ForeColorOpen` | Caption, open |
+| `BorderColorOpen` | Chrome border, open |
+| `ChevronColorOpen` | Chevron strokes, open |
+| `BackColorDisabled` | Chrome fill, disabled |
+| `ForeColorDisabled` | Caption, disabled |
+| `BorderColorDisabled` | Chrome border, disabled |
+| `ChevronColorDisabled` | Chevron strokes, disabled |
+| `ForeColorPlaceholder` | The placeholder string, drawn instead of the caption colour when nothing is selected. **One field, not four** — a placeholder is already a muted state, so it does not vary by mood |
+| `FocusRingColor` | The focus ring, drawn only while the control has focus |
+
+### Which colour wins
+
+The built-in painter picks one fill, one caption, one border and one chevron colour per repaint,
+in this precedence:
+
+```
+disabled   >   open   >   hot   >   idle
+```
+
+**Open beats hot on purpose.** While the list is up, the cursor is normally over the *list*, not
+over the button — and the button must stay lit while its own list is showing.
+
+**There are no pressed colours, and there is no pressed mood.** This control opens its list on
+mouse-down, so "pressed" and "open" are the same instant and collapse into one state.
+
+### Why the button reads borderless by default
+
+Every `BorderColorXxx` defaults **equal to** the matching `BackColorXxx`, so the chrome reads as a
+solid shape with no outline. If you want a visible border, set those four fields to something
+different from the fill — the border thickness is already 1, so it costs nothing until you do.
+
+The chevron follows the caption for the same reason: each `ChevronColorXxx` defaults equal to the
+matching `ForeColorXxx`, so caption and chevron change colour together. Set them to break that
+coupling.
+
+`BackColorOpen` defaults equal to `BackColor`, **not** to `BackColorHot`: in the open state only
+the caption and the chevron change, and the fill stays put.
+
+### The dropdown's colours
+
+`CPOPUPMENU_COLORS` ships with no defaults except its separator colour, so a list that is never
+given colours renders black on black. To stop that being the out-of-box experience, the control
+**derives the list's colours from its own** every time `CComboBox_SetColors` runs, and once more
+when the list is first created. Theming the button themes the list for free:
+
+| Dropdown field | Taken from |
+|---|---|
+| `BackColor` | `BackColor` |
+| `ForeColor` | `ForeColor` |
+| `BackColorHot` | `BackColorHot` |
+| `ForeColorHot` | `ForeColorHot` |
+| `ForeColorDisabled` | `ForeColorDisabled` |
+| `BorderColor` | **`BorderColorHot`** |
+| `SeparatorColor` | `ForeColorDisabled` |
+
+The border comes from `BorderColorHot` rather than `BorderColor` because the latter defaults equal
+to `BackColor` — deriving from it would give the popup an invisible border and no edge at all
+against the window behind it.
+
+Call `CComboBox_SetListColors` to override the whole set. That **claims** the dropdown's colours:
+the derivation stands down permanently for that control, so a later `CComboBox_SetColors` will not
+overwrite your choice.
+
+### What the painter draws
+
+| Part | Shape |
+|---|---|
+| Chrome | A rounded rectangle over `rcButton`, stroked with a border when the border thickness is above 0 and filled without one at 0. |
+| Caption | Drawn into `rcText` with `DT_LEFT` and `DT_END_ELLIPSIS`; `DT_NOPREFIX`, `DT_VCENTER` and `DT_SINGLELINE` are added by the buffer. Drawn in `ForeColorPlaceholder` when it is the placeholder. |
+| Chevron | Four strokes: an up chevron in the top half of the cell and a down chevron in the bottom half, separated by the chevron gap, both apexes pointing **away** from the centre. It is geometry, not a glyph, so it needs no icon font installed and it scales cleanly. A degenerate cell is skipped rather than drawn wrong. |
+| Focus ring | A rounded **outline** over `rcVisual`, drawn only while the control has focus and the ring thickness is above 0. Never a fill — it is drawn over the button, and a filled shape there would erase it. Its curvature is the chrome's plus the band on both sides, which is what keeps the two curves concentric. |
+
+All of it goes through `CBufferPaint`, which renders geometry with GDI+, so the chrome's corners
+and the chevron's diagonals are antialiased. A paint callback gets that same buffer and inherits
+the same antialiased primitives.
 
 ---
 
 ## Callbacks
 
-| Callback | Fires when |
-|---|---|
-| `CBO_PaintCallbackSub` | draw the whole **button** instead of the built-in painter |
-| `CBO_MessageCallbackFunc` | observe mouse / focus / key messages; `TRUE` suppresses default handling |
-| `CBO_SelChangeCallbackSub` | the **user** changed the selection — programmatic `SetCurSel` is silent |
-| `CBO_DropDownCallbackSub` | the list opened or closed |
+### Selection changed
 
-**Programmatic setters are silent; only the user notifies.** `SetCurSel` fires nothing (Win32's
-`CB_SETCURSEL` / `CBN_SELCHANGE` split), which is also what makes it safe to call from inside
-your own handler.
-
-`DropDownCallback` is the exception, and on purpose: it fires for programmatic opens too,
-because it reports a *window-state transition* rather than a value change — and its opening
-edge, which runs **before a single row is built**, is the just-in-time hook for rebuilding a
-dynamic list with `Clear` + `AddItem`.
-
-The message callback's result is **ignored for `WM_SETFOCUS` / `WM_KILLFOCUS`**: focus is a fact
-the system reports, not an action to veto.
-
-### One trap when writing a paint callback
-
-Draw the focus ring with **`PaintRoundOutline`**, never `PaintBorderRect`. The latter goes
-through `PaintRectFactory`, which **always fills the rect with `_backcolor`** before stroking
-it — so used for a ring it floods `rcVisual` with whatever colour you last set and wipes the
-chrome, the caption and the chevron you just drew, leaving a solid block. `PaintRoundOutline`
-exists for exactly this case ("stroke over already-painted pixels without filling"); pass
-curvature 0 for a square ring. The built-in painter uses it, and the demo's custom painter
-carries a comment saying why.
-
-The same shape bites anything drawn *over* existing pixels, not just the ring.
-
----
-
-## Two things worth knowing
-
-**1. The reopen trap, and how it is handled.** `CPopupMenu`'s filter dismisses on an outside
-click and then returns `FALSE` *on purpose*, so the click still reaches its target. For a click
-on the combobox's own button that is exactly wrong — the list would close and the following
-`WM_LBUTTONDOWN` would immediately reopen it, making the button impossible to close by clicking.
-`CComboBox_FilterMessage` notices that case and arms a one-shot flag the next down-click
-consumes. Deterministic; no timer, no close-time heuristic. **This only works if the filter is
-in your pump.**
-
-**2. No mouse capture is taken, anywhere.** The family's test is "take capture only if something
-consumes the guaranteed `WM_LBUTTONDOWN` → `WM_LBUTTONUP` pairing", and here it comes out
-negative: the down opens the list, and from that instant the popup owns the interaction. So
-there is no `WM_CAPTURECHANGED` handler, no snapshot-before-release dance, no `CancelPress`, and
-**no "callback result ignored for `WM_LBUTTONUP`" caution** — a note about capture copied in
-from a sibling would be a lie here.
-
-`CS_DBLCLKS` is **off**, which is `CToggle`'s and `CIconPanel`'s call rather than
-`CSelectBar`'s: a rapid second click on this button is a legitimate close-then-reopen, and
-`WM_LBUTTONDBLCLK` would silently swallow it.
-
-Only one popup chain may be open at a time (`CPopupMenu` shares it), and opening combobox B
-closes combobox A's list **silently** — no notification reaches A. `CComboBox` re-syncs its own
-flag whenever it is touched; the residual is that A's `DropDown(false)` callback may be deferred
-to A's next repaint-plus-interaction rather than firing at the instant B opened.
-
----
-
-## Verification
-
-Build clean, zero warnings. Then:
-
-```bash
-CCOMBOBOX_SELFTEST=1 main.exe
+```freebasic
+type CBO_SelChangeCallbackSub as sub( byval hCombo as HWND, byval idxOld as long, byval idxNew as long )
 ```
 
-43 geometry assertions covering: the ideal size before the control is ever sized and the parts
-it is built from; the width being independent of the selection and of the placeholder; the
-widest-item re-measure across insert and delete; `nCurSel` fix-up at all three mutation sites
-plus `Clear`; disabled-item refusal and arrow clamping; the rect partition and the reserved ring
-band; arrow-only mode; all three text modes including `WHENSELECTED`'s collapse, its expansion,
-its stability between selections, its collapse-on-disable, the caption having nowhere to go at
-the old window size, and auto-size applying the boundary change itself; the popup id ↔ index
-round trip and the single checkmark; `SyncListWidth` convergence in both directions; and the
-reopen guard's one-shot contract.
+The **user** changed the selection — a pick from the list, or an arrow / Home / End key while the
+list is closed. Fires **after** the control's state is updated, so `CComboBox_GetCurSel( hCombo )`
+already equals `idxNew`.
 
-**What the assertions cannot cover, and is left to the interactive pass:** pixel appearance of
-the chrome and chevron, hover, the open/close click cycle (including clicking the button while
-the list is up), Tab navigation, outside-click dismissal, and the dropdown's own rendering.
+It does not fire for `CComboBox_SetCurSel`, which is what makes it safe to call that setter from
+inside this handler. Picking the item that is already current is not a change and fires nothing;
+neither is a refused pick — a disabled item or an out-of-range index is dropped without notifying.
 
-**That pass has been run and passed** (2026-07-23, by the author), including
-`CBO_TEXT_WHENSELECTED` growing from a bare chevron to the full captioned button on the first
-pick. It matters more here than the assertion count does: the geometry is provable, but whether
-the thing *looks* like a combobox is not, and a human is the only check on it.
+Under `CBO_TEXT_WHENSELECTED` the new ideal width is already in place by the time you are called,
+so a host that re-places the control from here reads the correct size.
+
+### Dropdown opened or closed
+
+```freebasic
+type CBO_DropDownCallbackSub as sub( byval hCombo as HWND, byval isOpen as boolean )
+```
+
+The list is about to open (`isOpen = TRUE`) or has just closed (`isOpen = FALSE`).
+
+**It fires for programmatic opens too** — `CComboBox_DropDown` and `CComboBox_CloseUp` — unlike the
+selection callback. It reports a *window-state transition*, not a value change, and a host that
+rebuilds its items on open needs that to run however the list was opened.
+
+**The opening edge runs before a single row is built**, which makes it the just-in-time hook:
+`Clear` + `AddItem` here and the new set is picked up by the same open. On a pick, the closing
+notification goes out *before* the selection change, so a host handling both sees a consistent
+"closed, and here is the new value" order.
+
+```freebasic
+sub MyCombo_DropDown( byval hCombo as HWND, byval isOpen as boolean )
+    if isOpen = false then exit sub
+    CComboBox_Clear( hCombo )
+    for i as long = 0 to gDocs.Count - 1
+        CComboBox_AddItem( hCombo, gDocs.Name(i), gDocs.ID(i) )
+    next
+end sub
+```
+
+### Paint
+
+```freebasic
+type CBO_PaintCallbackSub as sub( byval p as CCOMBOBOX_PAINTINFO ptr )
+```
+
+Draws the whole **button** instead of the built-in painter. Paint through `p->b`, the control's
+double buffer for this repaint — do not touch the screen DC. This callback owns the button only;
+the dropdown is painted by `CPopupMenu` and is reached through `CComboBox_GetListHandle`.
+
+The control has already filled the client with the current mood's `BackColor` before calling you,
+so a callback that only wants to add something on top does not have to repaint the background.
+
+Draw with the **same font** you handed to `CComboBox_SetFont`: the button's width was measured
+with it, and a different font means the width lies.
+
+`CCOMBOBOX_PAINTINFO` carries everything you need:
+
+| Field | Meaning |
+|---|---|
+| `hCombo` | The control, so the callback can query it |
+| `b` | The control's `CBufferPaint` for this repaint (borrowed, not owned) |
+| `rcClient` | The whole client area |
+| `rcButton` | The chrome: `rcClient` deflated by the focus-ring band |
+| `rcText` | The caption box. Empty when `isTextVisible` is FALSE |
+| `rcChevron` | The stacked up/down chevron cell |
+| `rcVisual` | `rcButton` inflated by the focus-ring band |
+| `isHot` | The mouse is over the control and the list is closed |
+| `isOpen` | The dropdown is showing |
+| `isEnabled` | The control's enabled state |
+| `isFocused` | Draw a focus ring when TRUE |
+| `nCurSel` | The selected index, or -1 |
+| `wszText` | The caption to draw: the selected item's, or the placeholder, or `""` |
+| `isPlaceholder` | `wszText` is the placeholder, not a real selection |
+| `isTextVisible` | Is a caption drawn at all right now — already resolved from the text mode *and* the selection |
+
+All four rects are precomputed. Use them as given — in particular, do not re-derive `rcText` by
+re-applying the padding to `rcButton`, because the chevron size and the text gap can change
+underneath you.
+
+When `isTextVisible` is FALSE, `rcText` is empty and only the chevron should be drawn. Do not fall
+back to painting `wszText` somewhere of your own choosing: the field is still computed and handed
+to you as information.
+
+> **A paint callback that fills a rectangle covering the whole control will erase everything
+> under it.** Draw your additions, not a background — the control has already painted one. In
+> particular, stroke a focus ring with `PaintRoundOutline` and not `PaintBorderRect`:
+> `PaintBorderRect` always fills before it strokes.
+
+### Message
+
+```freebasic
+type CBO_MessageCallbackFunc as function( byval m as CCOMBOBOX_MESSAGEINFO ptr ) as boolean
+```
+
+Observes messages as they arrive. Return TRUE to suppress the control's own handling of that
+message, FALSE to let it proceed.
+
+`CCOMBOBOX_MESSAGEINFO` carries four fields:
+
+| Field | Meaning |
+|---|---|
+| `hCombo` | The control |
+| `uMsg` | The message |
+| `wParam` | Its `wParam` |
+| `lParam` | Its `lParam` |
+
+Mouse messages (including both right-button messages), focus changes (`WM_SETFOCUS`,
+`WM_KILLFOCUS`) and `WM_KEYDOWN` are all reported here.
+
+**Your return value is ignored for two messages:**
+
+| Message | Why |
+|---|---|
+| `WM_SETFOCUS` | Focus is a fact the system reports, not an action to veto. The state is already updated by the time you are called. A host that does not want the control focusable must not make it a tabstop. |
+| `WM_KILLFOCUS` | As above. |
+
+`WM_LBUTTONUP` is **not** on that list, unlike in the controls that take mouse capture: this one
+takes none, so there is no capture bookkeeping an unhandled up-message could strand, and your
+return value is honoured like any other.
+
+Returning TRUE from `WM_LBUTTONDOWN` suppresses the open/close, but **not** the focus change — the
+control focuses itself before calling you, because clicking a control focuses it whatever the host
+then decides about the click.
 
 ---
 
-## Not implemented, deliberately
+## Constants
 
-- **No tooltips.** No tooltip window is created and there is no `CBO_TooltipCallback` (by
-  request). A host that wants a tip can add its own tool over the control's `HWND`.
-- **No list scrolling** — see the CPopupMenu section.
-- **No editable / text-entry mode.** This is a picker, not a `CBS_DROPDOWN`.
-- **No multi-select**, no tri-state, no per-item icons or images.
-- **No typeahead** while the list is closed.
-- **No animation.**
-- **No `CComboBox_HitTest`** — the whole client is the hit area, so it could only ever return
-  what the caller already knows.
+### Text mode
 
-**No host uses this control yet.** tiko adoption is a separate task.
+```freebasic
+enum
+    CBO_TEXT_ALWAYS = 0       ' the default
+    CBO_TEXT_NEVER
+    CBO_TEXT_WHENSELECTED
+end enum
+```
+
+| Constant | Meaning |
+|---|---|
+| `CBO_TEXT_ALWAYS` | The caption is always drawn. With nothing selected that means the placeholder, or an empty button. The width never changes. |
+| `CBO_TEXT_NEVER` | Arrow-only, permanently: the ideal width collapses to padding + chevron. The control still **has** a selection and the list still checkmarks it; only the button's caption is suppressed. |
+| `CBO_TEXT_WHENSELECTED` | Arrow-only while nothing is selected, and an ordinary captioned combobox once something is. The button collapses until the user answers it. |
+
+**`CBO_TEXT_WHENSELECTED` is the one mode whose width moves**, and that is its purpose rather than
+a violation of the widest-item rule: every *selected* state still has the same width as every
+other, and what changes is the one-time `-1` → selected transition from "unanswered" to
+"answered", which the mode exists to make visible.
+
+The practical consequence: in this mode, either turn on `CComboBox_SetAutoSize`, or re-place the
+control from your `SelChange` handler. Left at a fixed size, the control keeps its collapsed width
+and the caption arrives ellipsized into a chevron-sized box. A placeholder can never be seen in
+this mode either, since the only state that would show it is the collapsed, caption-less one.
+
+### Geometry defaults
+
+| Constant | Value | Meaning |
+|---|---:|---|
+| `CCOMBOBOX_DEFAULT_PADLEFT` | 12 | Left padding inside the chrome, DPI-scaled at create |
+| `CCOMBOBOX_DEFAULT_PADRIGHT` | 10 | Right padding, DPI-scaled at create |
+| `CCOMBOBOX_DEFAULT_PADTOP` | 6 | Top padding, DPI-scaled at create |
+| `CCOMBOBOX_DEFAULT_PADBOTTOM` | 6 | Bottom padding, DPI-scaled at create |
+| `CCOMBOBOX_DEFAULT_TEXTGAP` | 8 | Caption-to-chevron gap, DPI-scaled at create |
+| `CCOMBOBOX_DEFAULT_CHEVRONW` | 9 | Chevron cell width, DPI-scaled at create. Odd on purpose, so the glyph comes to a point |
+| `CCOMBOBOX_DEFAULT_CHEVRONH` | 12 | Chevron cell height, DPI-scaled at create |
+| `CCOMBOBOX_DEFAULT_CHEVRONGAP` | 3 | Air between the up and down chevrons, DPI-scaled at create |
+| `CCOMBOBOX_DEFAULT_CURVATURE` | 12 | Corner ellipse **diameter** (so a 6px radius), DPI-scaled at create |
+| `CCOMBOBOX_DEFAULT_BORDERTHICK` | 1 | Border thickness, never DPI-scaled |
+| `CCOMBOBOX_DEFAULT_FOCUSGAP` | 2 | Focus-ring gap, DPI-scaled at create |
+| `CCOMBOBOX_DEFAULT_FOCUSTHICK` | 1 | Focus-ring thickness, never DPI-scaled |
+
+The chevron's stroke weight has no constant of its own: it defaults to 1 and is set with
+`CComboBox_SetChevronThickness`.
+
+### Internal timer
+
+| Constant | Value | Meaning |
+|---|---:|---|
+| `IDT_CCOMBOBOX_HOTTRACK` | `&hCB80` | Timer id for the hover safety-net poll. Timer ids are per-window, so every instance shares it |
+| `CCOMBOBOX_HOTTRACK_MS` | 100 | Its interval, in milliseconds |
+
+Neither needs anything from you; they are documented so you do not collide with the id if you
+subclass the control's window.
+
+---
+
+## Related controls
+
+**CComboBox embeds `CPopupMenu` as its dropdown, and uses it unmodified.** That is where the
+list's window behaviour comes from — a `WS_POPUP` that never takes activation, hover-is-selection,
+keyboard navigation, Escape, outside-click dismissal, and a checkmark per row — and it is also
+where three of this control's limits come from: the fixed left check gutter, the absence of
+scrolling, and the one-open-chain-at-a-time rule. All three are covered in *Behaviour and limits*.
+`CPopupMenu` is also what makes `CComboBox_FilterMessage` mandatory.
+
+Two neighbours worth knowing about, for when this control is the wrong shape:
+
+- If you need a **long, scrollable list**, this is not it — the dropdown clips at the work area.
+  `CListBox` is the scrolling list control.
+- If you want a **row of flat labels with exactly one current**, rather than a dropdown, that is
+  `CSelectBar`.
+
+Both the button and the list paint through `CBufferPaint`, which is why it appears in the file
+list even though you never call it directly — except from a paint callback, where it arrives as
+`p->b`.
