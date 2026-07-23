@@ -47,6 +47,32 @@
 #define CCOMBOBOX_DEFAULT_FOCUSTHICK   1     ' not DPI-scaled
 
 
+' Whether the button shows the selected item's caption, or only the chevron.
+'
+'   CBO_TEXT_ALWAYS        the caption is always drawn. With nothing selected that means the
+'                          placeholder, or an empty button. The width never changes.
+'   CBO_TEXT_NEVER         arrow-only, permanently. The control still HAS a selection and the
+'                          list still checkmarks it; only the caption is suppressed.
+'   CBO_TEXT_WHENSELECTED  arrow-only WHILE nothing is selected, and a normal captioned
+'                          combobox once something is. The button collapses to just the
+'                          chevron until the user answers it.
+'
+' THE THIRD MODE IS THE ONLY ONE WHOSE WIDTH MOVES, and it is worth being clear about why
+' that is not a contradiction of the widest-item rule. That rule exists so the button does not
+' resize as the user picks DIFFERENT items -- and it still holds: every selected state has the
+' same width. What changes is the -1 <-> selected boundary, which is a one-time transition
+' from "unanswered" to "answered", and the whole point of the mode is that it be visible.
+'
+' Practical consequence: in this mode, either turn on CComboBox_SetAutoSize, or re-place the
+' control from your SelChange handler. Left alone with a fixed size, the control keeps its
+' collapsed width and the caption arrives ellipsized into a chevron-sized box.
+enum
+    CBO_TEXT_ALWAYS = 0
+    CBO_TEXT_NEVER
+    CBO_TEXT_WHENSELECTED
+end enum
+
+
 ' Colors for the built-in painter. Copied on Set.
 '
 ' FOUR MOODS, not five. There is deliberately no PRESSED set: this control opens its list on
@@ -133,6 +159,10 @@ type CCOMBOBOX_PAINTINFO
     nCurSel    as long                 ' -1 = nothing selected
     wszText    as DWSTRING             ' the selected caption, or the placeholder, or ""
     isPlaceholder as boolean           ' wszText is the placeholder, not a real selection
+    ' Is the caption drawn at all right now? Resolved from the text mode and the selection, so
+    ' a callback never has to re-derive it. FALSE means rcText is EMPTY and only the chevron
+    ' should be drawn -- do not fall back to painting wszText somewhere of your own choosing.
+    isTextVisible as boolean
 end type
 
 type CCOMBOBOX_MESSAGEINFO
@@ -237,7 +267,10 @@ type CCOMBOBOX
     ' identifier, found 'HFONT'". See C:\dev\Learnings.md.
     hTextFont         as HFONT
     ' --- Layout inputs. All pixels; DPI-scaled once at Create, raw thereafter. ---
-    bShowText         as boolean = true    ' false = chevron only, no caption, no text gap
+    ' Never read this directly to decide whether to draw a caption -- CBO_TEXT_WHENSELECTED
+    ' also depends on nCurSel. IsTextVisible() is the single resolver and everything goes
+    ' through it: the layout, the painter, and the PAINTINFO flag handed to callbacks.
+    nTextMode         as long = CBO_TEXT_ALWAYS
     bAutoSize         as boolean = false   ' opt-in: the control SetWindowPos's ITSELF
     nPadLeft          as long = CCOMBOBOX_DEFAULT_PADLEFT
     nPadRight         as long = CCOMBOBOX_DEFAULT_PADRIGHT
@@ -271,6 +304,7 @@ type CCOMBOBOX
 
     declare sub      LayoutCombo()
     declare function RingPad() as long
+    declare function IsTextVisible() as boolean
     declare function GetCount() as long
     declare function IsValidItem( byval idx as long ) as boolean
     declare function GetItem( byval idx as long ) as CCOMBOBOX_ITEM ptr
@@ -292,6 +326,21 @@ function CCOMBOBOX.RingPad() as long
     return this.nFocusGap + this.nFocusThick
 end function
 
+' Is a caption drawn at the moment? The ONE resolver for the text mode -- the layout, the
+' painter and the PAINTINFO flag all come through here, so they cannot disagree.
+'
+' CBO_TEXT_WHENSELECTED reads nCurSel, which is why nTextMode must never be tested directly:
+' the answer depends on state, not just on the author's choice.
+function CCOMBOBOX.IsTextVisible() as boolean
+    select case this.nTextMode
+    case CBO_TEXT_NEVER
+        return false
+    case CBO_TEXT_WHENSELECTED
+        return this.IsValidItem( this.nCurSel )
+    end select
+    return true                                   ' CBO_TEXT_ALWAYS
+end function
+
 function CCOMBOBOX.GetCount() as long
     return this.itemCount
 end function
@@ -306,12 +355,19 @@ function CCOMBOBOX.GetItem( byval idx as long ) as CCOMBOBOX_ITEM ptr
 end function
 
 
-' What the button should show right now, and whether it is the placeholder.
+' The caption that represents the current state, and whether it is the placeholder.
 '
-' Three cases, in order: a valid selection draws its caption; no selection with a placeholder
-' set draws the placeholder in ForeColorPlaceholder; no selection and no placeholder draws
-' nothing at all. The width is unaffected either way -- it always comes from the widest ITEM,
-' so a combobox does not shrink to fit a short placeholder and then jump on first pick.
+' Three cases, in order: a valid selection gives its caption; no selection with a placeholder
+' set gives the placeholder (to be drawn in ForeColorPlaceholder); no selection and no
+' placeholder gives nothing at all. The width is unaffected either way -- it always comes from
+' the widest ITEM, so a combobox does not shrink to fit a short placeholder and then jump on
+' the first pick.
+'
+' THIS IS INDEPENDENT OF WHETHER THE CAPTION IS ACTUALLY DRAWN. IsTextVisible() decides that,
+' and in CBO_TEXT_NEVER or a collapsed CBO_TEXT_WHENSELECTED the answer here is still computed
+' and handed to the paint callback as information -- the callback is told not to draw it by
+' PAINTINFO's isTextVisible. One consequence worth knowing: a placeholder can never appear in
+' CBO_TEXT_WHENSELECTED, because the only state that would show it is the collapsed one.
 function CCOMBOBOX.DisplayText( byref bIsPlaceholder as boolean ) as DWSTRING
     bIsPlaceholder = false
     if this.IsValidItem( this.nCurSel ) then
@@ -457,7 +513,7 @@ end sub
 ' produced; painting, hit-testing, invalidation and every public size query consume it.
 '
 '   ringPad     = nFocusGap + nFocusThick        reserved ALWAYS, focused or not
-'   textW       = MAX over items of the measured caption width, 0 in arrow-only mode
+'   textW       = MAX over items of the measured caption width, 0 when no caption is drawn
 '   textH       = GetTextMetrics.tmHeight        ONE height for the control
 '   contentH    = max( textH, nChevronHeight )
 '
@@ -473,6 +529,13 @@ end sub
 ' WHY textW IS THE WIDEST ITEM AND NOT THE SELECTED ONE: the button must not change width when
 ' the selection changes. A combobox that grows and shrinks as the user picks reflows whatever
 ' surrounds it and drags its own dropdown anchor sideways.
+'
+' THE ONE PLACE THE WIDTH DOES MOVE is the -1 <-> selected boundary under
+' CBO_TEXT_WHENSELECTED, and that is the mode's whole purpose rather than an exception to the
+' rule above: every SELECTED state still has the same width as every other. The callers that
+' cross that boundary (SetCurSel, the user-selection path, SetItemEnabled disabling the current
+' item) mark the layout dirty only when the boundary is actually crossed, so an ordinary pick
+' still costs no re-measure.
 '
 ' WHY THE MEASURING PASS RUNS BEFORE THE ZERO-CLIENT BAIL: nIdealW/nIdealH do not depend on the
 ' client area at all, and CComboBox_GetIdealSize is exactly what a host calls to decide how big
@@ -509,7 +572,12 @@ sub CCOMBOBOX.LayoutCombo()
     GetTextMetricsW( hDC, @tm )
     this.nTextHeight = tm.tmHeight
 
-    if this.bShowText then
+    ' Resolved ONCE for the whole pass. Calling IsTextVisible() at each of the three sites
+    ' below would be correct today but invites a future edit that changes the selection
+    ' mid-layout and produces a button measured one way and placed another.
+    dim as boolean bText = this.IsTextVisible()
+
+    if bText then
         ' The PLACEHOLDER is deliberately NOT measured. Width comes from the item set alone,
         ' so a long placeholder cannot inflate the button and a short one cannot let it
         ' shrink -- either would make the button resize on the user's first pick.
@@ -536,7 +604,7 @@ sub CCOMBOBOX.LayoutCombo()
     ' The gap is spent only when there is a caption to separate from the chevron. In
     ' arrow-only mode there is nothing on the left, so charging for it would leave the arrow
     ' visibly off-centre in its own padding.
-    if this.bShowText then textBlock = this.nTextWidth + this.nTextGap
+    if bText then textBlock = this.nTextWidth + this.nTextGap
 
     this.nIdealW = (2 * nRingPad) + this.nPadLeft + textBlock + this.nChevronWidth + this.nPadRight
     this.nIdealH = (2 * nRingPad) + this.nPadTop + contentH + this.nPadBottom
@@ -564,7 +632,7 @@ sub CCOMBOBOX.LayoutCombo()
                             (((this.rcButton.bottom - this.rcButton.top) - this.nChevronHeight) \ 2)
     SetRect( @this.rcChevron, chevLeft, chevTop, chevRight, chevTop + this.nChevronHeight )
 
-    if this.bShowText then
+    if bText then
         dim as long textLeft  = this.rcButton.left + this.nPadLeft
         dim as long textRight = this.rcChevron.left - this.nTextGap
         ' Degenerate rather than negative when the client is too narrow (see OVERFLOW above).
@@ -712,9 +780,13 @@ declare sub      CComboBox_Refresh( byval hCombo as HWND )
 ' Layout.  ALL setters take RAW PIXELS -- the caller DPI-scales (the family rule; only the
 ' Create-time defaults are scaled for you). The THICKNESS values should not be scaled at all.
 '
-'   SetShowText(false) is ARROW-ONLY mode: no caption, no text gap, and the ideal width
-'     collapses to padding + chevron. The selection still exists and the list still checkmarks
-'     it -- only the button's caption is suppressed.
+'   SetTextMode picks one of CBO_TEXT_ALWAYS / _NEVER / _WHENSELECTED -- see the enum for what
+'     each means and for the width consequence of the third. SetShowText is the two-state
+'     convenience over it (TRUE = ALWAYS, FALSE = NEVER); GetShowText answers "is a caption
+'     drawn RIGHT NOW", which for CBO_TEXT_WHENSELECTED depends on the selection.
+'     In arrow-only there is no caption and no text gap, and the ideal width collapses to
+'     padding + chevron. The selection still exists and the list still checkmarks it -- only
+'     the button's caption is suppressed.
 '   SetAutoSize(true) makes the control SetWindowPos ITSELF (preserving its top-left) whenever
 '     something that changes the ideal width changes: items, font, show-text, padding, chevron
 '     size, focus ring. Default FALSE, which is the strict family rule -- the host measures
@@ -738,6 +810,8 @@ declare sub      CComboBox_Refresh( byval hCombo as HWND )
 '   if the control has no geometry yet (created but never sized). rcText is EMPTY in
 '   arrow-only mode, and the query still returns TRUE -- empty is the honest answer.
 ' ----------------------------------------------------------------------------------------
+declare function CComboBox_GetTextMode( byval hCombo as HWND ) as long
+declare sub      CComboBox_SetTextMode( byval hCombo as HWND, byval nTextMode as long )
 declare function CComboBox_GetShowText( byval hCombo as HWND ) as boolean
 declare sub      CComboBox_SetShowText( byval hCombo as HWND, byval bShowText as boolean )
 declare function CComboBox_GetAutoSize( byval hCombo as HWND ) as boolean

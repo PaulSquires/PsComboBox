@@ -158,6 +158,17 @@ sub CComboBox_DemoSelChange( byval hCombo as HWND, byval idxOld as long, byval i
     wszCaption = CComboBox_GetText( hCombo )
     s &= "   [" & str(wszCaption) & "]"
     print s
+
+    ' Re-place every combobox on a user pick. This matters for exactly one row -- the
+    ' CBO_TEXT_WHENSELECTED one, whose ideal width jumps the first time it is answered -- and
+    ' it is the pattern a host needs when it has NOT turned on auto-size: the control owns its
+    ' size, the host still owns its position, so a control that grew in place must be moved to
+    ' stay right-aligned. Costs nothing for the rows whose width never moves.
+    dim as HWND hForm = GetParent( hCombo )
+    if hForm then
+        frmMain_PositionCombos( hForm )
+        InvalidateRect( hForm, NULL, TRUE )
+    end if
 end sub
 
 sub CComboBox_DemoDropDown( byval hCombo as HWND, byval isOpen as boolean )
@@ -395,7 +406,7 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
 
     HWND_FRMMAIN = pWindow->Create( _
             null, APPNAME, @frmMain_WndProc, _
-            100, 100, 700, 480 _
+            100, 100, 700, 540 _
             )
 
     gRows(0).wszLabel = "The reference screenshot"
@@ -410,6 +421,8 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     gRows(4).wszNote  = "the buttons below exercise the selection fix-up"
     gRows(5).wszLabel = "Custom painter"
     gRows(5).wszNote  = "square chrome and a solid triangle, drawn by the host"
+    gRows(6).wszLabel = "Collapse until answered"
+    gRows(6).wszNote  = "CBO_TEXT_WHENSELECTED + AutoSize -- arrows only until you pick"
 
     for i as long = 0 to COMBO_COUNT - 1
         ghCombo(i) = CComboBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_COMBO_FIRST + i )
@@ -471,6 +484,16 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     lc.BorderColor       = theme.FocusAccent
     lc.SeparatorColor    = theme.Divider
     CComboBox_SetListColors( ghCombo(5), @lc )
+
+    ' Row 6 -- the requested behaviour: no selection, so the button is JUST the chevron; make
+    ' a choice and it becomes an ordinary captioned combobox. Auto-size is on so the control
+    ' applies the new width itself; the shared SelChange handler re-places it so it stays
+    ' right-aligned as it grows. Deliberately NO placeholder -- in this mode one could never
+    ' be seen, since the only state that would show it is the collapsed, caption-less one.
+    CComboBox_AddItem( ghCombo(COMBO_WHENSEL), "Add to Existing Window", 1 )
+    CComboBox_AddItem( ghCombo(COMBO_WHENSEL), "Open a New Window", 2 )
+    CComboBox_SetTextMode( ghCombo(COMBO_WHENSEL), CBO_TEXT_WHENSELECTED )
+    CComboBox_SetAutoSize( ghCombo(COMBO_WHENSEL), true )
 
     ' The three push buttons. Plain Win32 BUTTONs -- this demo is about the combobox.
     pWindow->AddControl( "Button", HWND_FRMMAIN, IDC_FRMMAIN_BTN_ADD, "Add item", 0, 0, 10, 10 )

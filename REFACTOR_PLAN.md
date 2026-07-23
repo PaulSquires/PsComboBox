@@ -24,6 +24,7 @@ and from **CSelectBar** for the measure-the-text-to-size-the-cell layout pass.
 | Keyboard when closed | **Win32 combobox rules** | Up/Down/Home/End move the selection in place; Alt+Down / F4 / Space / Enter open. What a Windows user's fingers already expect. |
 | No selection | **`-1` is legal**, with an optional placeholder | A picker that has not been answered yet is a real state. This is the deliberate departure from `CSelectBar`'s always-exactly-one contract. |
 | Chevron | **Drawn geometrically** | No icon-font dependency, scales cleanly with DPI, identical on every machine. GDI+ antialiases the diagonals for free through `CBufferPaint`. |
+| Text mode | **Three-state**, default `CBO_TEXT_ALWAYS` | `CBO_TEXT_WHENSELECTED` (collapse to arrows until answered) was added after the first build, on request. Made a third mode rather than the default so the placeholder feature decided in the interview keeps working; flipping the default is a one-word change. |
 | Item set | **Dynamic** | A combobox is repopulated at runtime. This is the family's most repeated bug class, so the three fix-up sites are named in the code and asserted in the self-test. |
 | Open on | **Mouse-DOWN**, and therefore **no capture** | Real combobox behaviour, and the family's capture test comes out negative. |
 
@@ -115,6 +116,26 @@ host called `GetIdealSize` to do.
 
 ---
 
+## The width rule, and its one exception
+
+`textW` is the WIDEST item, never the selected one, so the button cannot resize as the user
+picks between items. `CBO_TEXT_WHENSELECTED` is the single exception and only at the
+`-1` ↔ selected boundary — a one-time unanswered-to-answered transition, which is the mode's
+entire purpose.
+
+Two implementation notes on that exception:
+
+**The dirty-marking is driven off the resolver, not off a `-1` test.** `IsTextVisible()` is
+sampled before the selection changes and compared after; `CComboBox_AfterSelectionChange` acts
+only when the two differ. That keeps an ordinary pick free of any re-measure (the optimisation
+`ApplyUserSel` depends on), and it stays correct for any future mode without anyone having to
+remember that function exists. Three call sites cross the boundary: `SetCurSel`, the
+user-selection path, and `SetItemEnabled` disabling the current item.
+
+**`AfterSelectionChange` runs BEFORE the `SelChange` callback.** A host that re-places the
+control from its handler — which is what this mode asks of a host that has not turned on
+auto-size — must find `GetIdealSize` already reporting the new width.
+
 ## The one trap this design carries
 
 `CPopupMenu_FilterMessage` dismisses the chain on an outside click and then returns **`FALSE` on
@@ -156,7 +177,7 @@ i.e. patching CMenuBar. Not worth it for this.
 ## Status
 
 - Builds clean, zero warnings.
-- `CCOMBOBOX_SELFTEST=1` → **33/33 assertions passing**.
+- `CCOMBOBOX_SELFTEST=1` → **43/43 assertions passing**.
 - **Not exercised interactively.** Nothing about hover, the click cycle, focus, Tab, the
   dropdown's appearance or the reopen guard's real behaviour has been confirmed by a human
   looking at it. That pass is the author's and has not been run.

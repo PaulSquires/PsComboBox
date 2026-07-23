@@ -105,6 +105,40 @@ it is handed — deliberate, since a glyph's stroke should grow with the glyph.
 `SetCornerCurvature` takes an ellipse **diameter**, not a radius: `CBufferPaint` keeps GDI's
 vocabulary and halves it internally. 12 draws a 6px radius; 0 gives square corners.
 
+### Text modes
+
+`CComboBox_SetTextMode` picks one of three:
+
+| Mode | Button shows | Width |
+|---|---|---|
+| `CBO_TEXT_ALWAYS` *(default)* | always the caption (or the placeholder, or nothing) | fixed, from the widest item |
+| `CBO_TEXT_NEVER` | only the chevron, permanently | fixed, padding + chevron |
+| `CBO_TEXT_WHENSELECTED` | only the chevron while nothing is selected; the caption once something is | **moves once**, on the `-1` ↔ selected boundary |
+
+`CBO_TEXT_WHENSELECTED` is the "don't answer for me" shape: a combobox that starts as a bare
+pair of arrows and becomes an ordinary captioned combobox the moment the user picks something.
+
+**It is the only mode whose width moves, and that is not a contradiction of the widest-item
+rule** — that rule exists so the button doesn't resize as the user picks *different* items, and
+it still holds: every selected state has the same width. What changes is the one-time
+transition from unanswered to answered, which is the point of the mode.
+
+So in this mode, **either turn on `SetAutoSize(true)` or re-place the control from your
+`SelChange` handler.** Left at a fixed size the control keeps its collapsed width and the
+caption arrives ellipsized into a chevron-sized box — the self-test asserts exactly that,
+because it's a real cost and not a bug. `SelChange` fires *after* the new ideal width is
+computed, so a handler that calls `GetIdealSize` sees the new value.
+
+A **placeholder can never appear** in this mode: the only state that would show one is the
+collapsed, caption-less state. Setting both isn't an error, just inert.
+
+`SetShowText(bool)` is the two-state convenience (`TRUE` → `ALWAYS`, `FALSE` → `NEVER`); it
+cannot reach `WHENSELECTED`. `GetShowText` answers **"is a caption drawn right now"**, which
+for `WHENSELECTED` depends on the selection — deliberately not an echo of the mode.
+
+Paint callbacks get `isTextVisible` in `CCOMBOBOX_PAINTINFO` so they never have to re-derive
+it; when it's false, `rcText` is empty.
+
 ### Auto-size
 
 `CComboBox_SetAutoSize(true)` makes the control `SetWindowPos` **itself** (preserving its
@@ -267,12 +301,15 @@ Build clean, zero warnings. Then:
 CCOMBOBOX_SELFTEST=1 main.exe
 ```
 
-33 geometry assertions covering: the ideal size before the control is ever sized and the parts
+43 geometry assertions covering: the ideal size before the control is ever sized and the parts
 it is built from; the width being independent of the selection and of the placeholder; the
 widest-item re-measure across insert and delete; `nCurSel` fix-up at all three mutation sites
 plus `Clear`; disabled-item refusal and arrow clamping; the rect partition and the reserved ring
-band; arrow-only mode; the popup id ↔ index round trip and the single checkmark;
-`SyncListWidth` convergence in both directions; and the reopen guard's one-shot contract.
+band; arrow-only mode; all three text modes including `WHENSELECTED`'s collapse, its expansion,
+its stability between selections, its collapse-on-disable, the caption having nowhere to go at
+the old window size, and auto-size applying the boundary change itself; the popup id ↔ index
+round trip and the single checkmark; `SyncListWidth` convergence in both directions; and the
+reopen guard's one-shot contract.
 
 **What the assertions cannot cover, and is left to the interactive pass:** pixel appearance of
 the chrome and chevron, hover, the open/close click cycle (including clicking the button while

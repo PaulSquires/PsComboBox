@@ -22,7 +22,8 @@
 '   3  NO SELECTION (-1) with a placeholder string
 '   4  a MUTABLE list, driven by the two buttons below, exercising the index fix-up
 '   5  a custom PAINT CALLBACK replacing the built-in painter wholesale
-#define COMBO_COUNT   6
+'   6  CBO_TEXT_WHENSELECTED: arrow-only until answered, then a captioned combobox
+#define COMBO_COUNT   7
 
 #define IDC_FRMMAIN_COMBO_FIRST    1000
 #define IDC_FRMMAIN_BTN_ADD        1100
@@ -31,5 +32,7 @@
 
 ' The mutable row -- the one the Add/Delete buttons act on.
 #define COMBO_MUTABLE   4
+' The collapse-until-answered row.
+#define COMBO_WHENSEL   6
 
 declare function frmMain_Show( byval hWndParent as HWND ) as LRESULT

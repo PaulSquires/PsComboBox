@@ -5,6 +5,12 @@
 #include once "CComboBox.bi"
 
 
+' Forward declaration: the selection setters need to re-apply auto-size when a
+' CBO_TEXT_WHENSELECTED button crosses the -1 boundary, and they are defined well above the
+' layout section where this lives.
+declare sub CComboBox_ApplyAutoSize( byval pCombo as CCOMBOBOX ptr )
+
+
 function GetComboBoxPointer( byval hCombo as HWND ) as CCOMBOBOX ptr
     dim pWindow as CWindow ptr = AfxCWindowPtr(hCombo)
     if pWindow = 0 then return 0
@@ -172,14 +178,47 @@ end sub
 
 
 ' ========================================================================================
+' React to a selection change that may have crossed the -1 <-> selected boundary.
+'
+' Under CBO_TEXT_WHENSELECTED the button collapses to just the chevron while nothing is
+' selected and expands to a captioned combobox once something is -- so that one transition
+' changes the IDEAL WIDTH, and the layout has to be re-measured and (if the host opted in)
+' the control re-sized.
+'
+' It is driven off IsTextVisible() sampled BEFORE and AFTER the change rather than off
+' "was it -1", so it stays correct for any future mode without anyone having to remember
+' this function exists. In CBO_TEXT_ALWAYS and CBO_TEXT_NEVER the two samples are always
+' equal and this is a no-op -- which is what keeps an ordinary pick from re-measuring every
+' item, the optimisation ApplyUserSel's header depends on.
+'
+' Call it AFTER the new selection is stored, with the pre-change sample.
+' ========================================================================================
+private sub CComboBox_AfterSelectionChange( _
+            byval pCombo      as CCOMBOBOX ptr, _
+            byval bTextBefore as boolean _
+            )
+
+    if pCombo = 0 then exit sub
+    if pCombo->IsTextVisible() = bTextBefore then exit sub
+    pCombo->bLayoutDirty = true
+    if pCombo->hWin then InvalidateRect( pCombo->hWin, NULL, TRUE )
+    CComboBox_ApplyAutoSize( pCombo )
+end sub
+
+
+' ========================================================================================
 ' Adopt a selection because the USER asked for it -- a pick from the list, or an arrow / Home
 ' / End key. The one place that fires the change callback, so mouse and keyboard cannot drift
 ' apart. Picking what is already current is not a change and fires nothing.
 '
-' NOTE THE LAYOUT IS *NOT* MARKED DIRTY. The button's width comes from the WIDEST item, never
-' from the selected one, so a selection change cannot move a single rect -- only the string
-' being drawn into rcText changes. Marking it dirty here would force a needless re-measure of
-' every item on every pick.
+' THE LAYOUT IS NOT MARKED DIRTY FOR AN ORDINARY PICK. The button's width comes from the
+' WIDEST item, never from the selected one, so a selection change cannot move a single rect --
+' only the string being drawn into rcText changes. Marking it dirty here unconditionally would
+' force a needless re-measure of every item on every pick.
+'
+' The ONE exception is the -1 <-> selected boundary under CBO_TEXT_WHENSELECTED, and it is
+' handled by CComboBox_AfterSelectionChange rather than by a test here -- see its header for
+' why it samples the resolver instead of testing for -1.
 '
 ' The callback goes out LAST, after the state is consistent, so a host that queries
 ' CComboBox_GetCurSel() from inside it sees the new value.
@@ -197,9 +236,14 @@ private sub CComboBox_ApplyUserSel( _
         if pCombo->items(idxNew).isEnabled = false then exit sub
     end if
 
+    dim as boolean bTextBefore = pCombo->IsTextVisible()
     dim as long idxOld = pCombo->nCurSel
     pCombo->nCurSel = idxNew
     InvalidateRect( hwnd, NULL, FALSE )
+    ' Before the callback: a host that re-places the control from its SelChange handler (which
+    ' is what CBO_TEXT_WHENSELECTED asks of a host that has not turned on auto-size) must find
+    ' GetIdealSize already reporting the NEW width.
+    CComboBox_AfterSelectionChange( pCombo, bTextBefore )
     if pCombo->SelChangeCallback then pCombo->SelChangeCallback( hwnd, idxOld, idxNew )
 end sub
 
@@ -306,7 +350,9 @@ private sub CComboBox_RenderDefault( _
     end if
 
     ' ---- the caption -------------------------------------------------------------------
-    if pCombo->bShowText then
+    ' p->isTextVisible, NOT pCombo->nTextMode: under CBO_TEXT_WHENSELECTED the answer depends
+    ' on the selection, and rcText is empty whenever this is false.
+    if p->isTextVisible then
         if len( p->wszText ) > 0 then
             dim as COLORREF clrText = clrFore
             if p->isPlaceholder then clrText = pCombo->colors.ForeColorPlaceholder
@@ -416,6 +462,7 @@ private function CComboBox_OnPaint( byval hwnd as HWND ) as LRESULT
     dim as boolean bPlaceholder = false
     p.wszText       = pCombo->DisplayText( bPlaceholder )
     p.isPlaceholder = bPlaceholder
+    p.isTextVisible = pCombo->IsTextVisible()
 
     if pCombo->PaintCallback then
         pCombo->PaintCallback( @p )
@@ -949,11 +996,15 @@ function CComboBox_SetItemEnabled( byval hCombo as HWND, byval idx as long, byva
     dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     if pCombo->IsValidItem(idx) = false then return false
+    dim as boolean bTextBefore = pCombo->IsTextVisible()
     pCombo->items(idx).isEnabled = bEnabled
     if bEnabled = false then
         if pCombo->nCurSel = idx then pCombo->nCurSel = -1
     end if
     if pCombo->hWin then InvalidateRect( pCombo->hWin, NULL, FALSE )
+    ' Clearing the selection here can collapse a CBO_TEXT_WHENSELECTED button back to
+    ' arrow-only, which is a width change like any other.
+    CComboBox_AfterSelectionChange( pCombo, bTextBefore )
     return true
 end function
 
@@ -1005,8 +1056,10 @@ function CComboBox_SetCurSel( byval hCombo as HWND, byval idx as long ) as boole
         if pCombo->items(idx).isEnabled = false then return false
     end if
     if pCombo->nCurSel = idx then return true
+    dim as boolean bTextBefore = pCombo->IsTextVisible()
     pCombo->nCurSel = idx
     if pCombo->hWin then InvalidateRect( pCombo->hWin, NULL, FALSE )
+    CComboBox_AfterSelectionChange( pCombo, bTextBefore )
     return true
 end function
 
@@ -1156,14 +1209,38 @@ end sub
 function CComboBox_GetShowText( byval hCombo as HWND ) as boolean
     dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
-    return pCombo->bShowText
+    return pCombo->IsTextVisible()
 end function
 
+' The two-state convenience over SetTextMode. TRUE = CBO_TEXT_ALWAYS, FALSE = CBO_TEXT_NEVER.
+' It cannot reach CBO_TEXT_WHENSELECTED -- that mode has no boolean spelling, which is exactly
+' why the enum exists. Note the asymmetry with the getter, which answers "is a caption drawn
+' right now" rather than echoing the mode back: for WHENSELECTED those are different questions
+' and the state one is what a caller has any use for.
 sub CComboBox_SetShowText( byval hCombo as HWND, byval bShowText as boolean )
+    if bShowText then
+        CComboBox_SetTextMode( hCombo, CBO_TEXT_ALWAYS )
+    else
+        CComboBox_SetTextMode( hCombo, CBO_TEXT_NEVER )
+    end if
+end sub
+
+function CComboBox_GetTextMode( byval hCombo as HWND ) as long
+    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+    if pCombo = 0 then return CBO_TEXT_ALWAYS
+    return pCombo->nTextMode
+end function
+
+sub CComboBox_SetTextMode( byval hCombo as HWND, byval nTextMode as long )
     dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
-    if pCombo->bShowText = bShowText then exit sub
-    pCombo->bShowText = bShowText
+    select case nTextMode
+    case CBO_TEXT_ALWAYS, CBO_TEXT_NEVER, CBO_TEXT_WHENSELECTED
+    case else
+        exit sub                 ' ignore garbage rather than laying out somewhere strange
+    end select
+    if pCombo->nTextMode = nTextMode then exit sub
+    pCombo->nTextMode = nTextMode
     pCombo->Refresh()
     CComboBox_ApplyAutoSize( pCombo )
 end sub
@@ -1775,6 +1852,102 @@ sub CComboBox_RunSelfTest( byval hWndParent as HWND )
     sD = "textRect=" & str(rcTxt.left) & "," & str(rcTxt.top) & "," & str(rcTxt.right) & "," & str(rcTxt.bottom)
     CBOTest_Check( "arrow-only text rect is empty", IsRectEmpty( @rcTxt ) <> 0, sD )
     CComboBox_SetShowText( h, true )
+
+    ' ---- 9b. CBO_TEXT_WHENSELECTED: collapsed while -1, expanded once selected ----------
+    CComboBox_SetTextMode( h, CBO_TEXT_WHENSELECTED )
+    CComboBox_SetCurSel( h, -1 )
+    dim as long wCollapsed, hCollapsed
+    CComboBox_GetIdealSize( h, wCollapsed, hCollapsed )
+    sD = "collapsed=" & str(wCollapsed) & " arrowOnly=" & str(wArrow) & " withText=" & str(wText)
+    CBOTest_Check( "WHENSELECTED with -1 is exactly the arrow-only width", _
+                   (wCollapsed = wArrow), sD )
+
+    CComboBox_GetTextRect( h, rcTxt )
+    sD = "textRect empty=" & str(IsRectEmpty( @rcTxt ) <> 0) & _
+         " GetShowText=" & str(CComboBox_GetShowText(h))
+    CBOTest_Check( "WHENSELECTED with -1 draws no caption", _
+                   (IsRectEmpty( @rcTxt ) <> 0) andalso (CComboBox_GetShowText(h) = false), sD )
+
+    ' A placeholder cannot surface in this mode -- the only state that would show one is the
+    ' collapsed state, which has no caption at all.
+    CComboBox_SetPlaceholderText( h, "Choose an action..." )
+    dim as long wCollapsedPH, hCollapsedPH
+    CComboBox_GetIdealSize( h, wCollapsedPH, hCollapsedPH )
+    sD = "withPlaceholder=" & str(wCollapsedPH) & " without=" & str(wCollapsed)
+    CBOTest_Check( "WHENSELECTED ignores the placeholder entirely", _
+                   (wCollapsedPH = wCollapsed), sD )
+    CComboBox_SetPlaceholderText( h, "" )
+
+    CComboBox_SetCurSel( h, 0 )
+    dim as long wExpanded, hExpanded
+    CComboBox_GetIdealSize( h, wExpanded, hExpanded )
+    sD = "expanded=" & str(wExpanded) & " withText=" & str(wText) & " collapsed=" & str(wCollapsed)
+    CBOTest_Check( "WHENSELECTED expands to the full captioned width on first pick", _
+                   (wExpanded = wText) andalso (wExpanded > wCollapsed), sD )
+
+    ' The IDEAL width moved but the WINDOW did not -- nothing resized it, and auto-size is
+    ' off. So the caption has nowhere to go and rcText degenerates against the chevron. That
+    ' is this mode's documented cost, asserted here rather than left as a surprise: the
+    ' control owns its size only when the host says so.
+    CComboBox_GetTextRect( h, rcTxt )
+    sD = "textRect=" & str(rcTxt.left) & "," & str(rcTxt.right) & _
+         " window still " & str(wArrow) & " wide, ideal now " & str(wExpanded)
+    CBOTest_Check( "WHENSELECTED at the OLD window size has nowhere for the caption", _
+                   (rcTxt.right = rcTxt.left) andalso (CComboBox_GetShowText(h) = true), sD )
+
+    ' Apply the new ideal size, which is exactly what a host must do here.
+    CBOTest_SizeTo( h, wExpanded, hExpanded, cw, ch )
+    CComboBox_GetTextRect( h, rcTxt )
+    CComboBox_GetChevronRect( h, rcChev )
+    sD = "textRect=" & str(rcTxt.left) & ".." & str(rcTxt.right) & _
+         " chevron.left-gap=" & str(rcChev.left - pC->nTextGap)
+    CBOTest_Check( "WHENSELECTED draws a real caption once the host resizes", _
+                   (rcTxt.right > rcTxt.left) andalso _
+                   (rcTxt.right = rcChev.left - pC->nTextGap), sD )
+
+    ' With auto-size ON the control applies that width change ITSELF as the boundary is
+    ' crossed, which is what makes the mode usable without a SelChange handler at all.
+    CComboBox_SetCurSel( h, -1 )
+    CComboBox_SetAutoSize( h, true )
+    dim as RECT rcWin
+    GetWindowRect( h, @rcWin )
+    dim as long wWinCollapsed = rcWin.right - rcWin.left
+    CComboBox_SetCurSel( h, 0 )
+    GetWindowRect( h, @rcWin )
+    dim as long wWinExpanded = rcWin.right - rcWin.left
+    sD = "window " & str(wWinCollapsed) & " -> " & str(wWinExpanded) & _
+         "  (ideal " & str(wCollapsed) & " -> " & str(wExpanded) & ")"
+    CBOTest_Check( "auto-size applies the boundary width change itself", _
+                   (wWinCollapsed = wCollapsed) andalso (wWinExpanded = wExpanded), sD )
+    CComboBox_SetAutoSize( h, false )
+
+    ' Selection-to-selection must NOT move the width -- the widest-item rule still holds
+    ' inside the expanded state, which is the whole reason the boundary case is acceptable.
+    CComboBox_SetCurSel( h, 1 )
+    dim as long wOther, hOther
+    CComboBox_GetIdealSize( h, wOther, hOther )
+    sD = "sel0=" & str(wExpanded) & " sel1=" & str(wOther)
+    CBOTest_Check( "WHENSELECTED width is stable between selections", (wOther = wExpanded), sD )
+
+    ' And back: clearing the selection collapses it again.
+    CComboBox_SetCurSel( h, -1 )
+    dim as long wBack, hBack
+    CComboBox_GetIdealSize( h, wBack, hBack )
+    sD = "back=" & str(wBack) & " collapsed=" & str(wCollapsed)
+    CBOTest_Check( "WHENSELECTED collapses again when cleared", (wBack = wCollapsed), sD )
+
+    ' Disabling the current item clears it, which must collapse the button too.
+    CComboBox_SetCurSel( h, 0 )
+    CComboBox_SetItemEnabled( h, 0, false )
+    dim as long wDis, hDis
+    CComboBox_GetIdealSize( h, wDis, hDis )
+    sD = "sel=" & str(CComboBox_GetCurSel(h)) & " width=" & str(wDis) & " collapsed=" & str(wCollapsed)
+    CBOTest_Check( "disabling the current item collapses WHENSELECTED", _
+                   (CComboBox_GetCurSel(h) = -1) andalso (wDis = wCollapsed), sD )
+    CComboBox_SetItemEnabled( h, 0, true )
+
+    CComboBox_SetTextMode( h, CBO_TEXT_ALWAYS )
+    CComboBox_SetCurSel( h, 1 )
 
     ' ---- 10. the popup id <-> model index round trip ------------------------------------
     ' The rows carry (index + 1) so that index 0 does not collide with CPopupMenu's separator
