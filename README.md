@@ -315,6 +315,11 @@ reopen guard's one-shot contract.
 the chrome and chevron, hover, the open/close click cycle (including clicking the button while
 the list is up), Tab navigation, outside-click dismissal, and the dropdown's own rendering.
 
+**That pass has been run and passed** (2026-07-23, by the author), including
+`CBO_TEXT_WHENSELECTED` growing from a bare chevron to the full captioned button on the first
+pick. It matters more here than the assertion count does: the geometry is provable, but whether
+the thing *looks* like a combobox is not, and a human is the only check on it.
+
 ---
 
 ## Not implemented, deliberately

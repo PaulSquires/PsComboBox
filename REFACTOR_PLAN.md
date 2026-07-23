@@ -178,7 +178,9 @@ i.e. patching CMenuBar. Not worth it for this.
 
 - Builds clean, zero warnings.
 - `CCOMBOBOX_SELFTEST=1` → **43/43 assertions passing**.
-- **Not exercised interactively.** Nothing about hover, the click cycle, focus, Tab, the
-  dropdown's appearance or the reopen guard's real behaviour has been confirmed by a human
-  looking at it. That pass is the author's and has not been run.
-- **No host uses this control.** tiko adoption is a separate task.
+- **The interactive pass has been run and passed** (2026-07-23, by the author), including
+  `CBO_TEXT_WHENSELECTED` growing from a bare chevron to the full captioned button on the
+  first pick. That is what closes the control out: the assertions prove the geometry, and only
+  a human can say the result reads as a combobox.
+- **No host uses this control.** tiko adoption is a separate task, and until one exists the
+  control has never run inside a real message pump other than the demo's.
