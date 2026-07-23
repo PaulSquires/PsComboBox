@@ -223,8 +223,9 @@ after `ShowWindow`.
 > the control declared itself a *container*, the dialog manager descended into it looking for
 > tabstops, found no children, and skipped it. **This repo's own demo hid it**: the demo also
 > hosts three plain Win32 `BUTTON`s, so Tab moved between *those* and the interactive pass saw
-> focus moving and concluded navigation worked. Now passed explicitly as `0`, and asserted three
-> ways in the self-test. Note this fix is **wrong** for
+> focus moving and concluded navigation worked. Now passed explicitly as `0`, asserted three ways
+> in the self-test, and confirmed by an interactive pass that specifically watched Tab land on a
+> combobox rather than merely move. Note this fix is **wrong** for
 > `CListBox`/`CTextBox`/`CNumericUpDown`/`CScrollPanel`, which genuinely need the flag; see
 > `C:\dev\Learnings.md`.
 
