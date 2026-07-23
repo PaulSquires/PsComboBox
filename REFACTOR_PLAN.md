@@ -177,7 +177,40 @@ i.e. patching CMenuBar. Not worth it for this.
 ## Status
 
 - Builds clean, zero warnings.
-- `CCOMBOBOX_SELFTEST=1` → **43/43 assertions passing**.
+- `CCOMBOBOX_SELFTEST=1` → **46/46 assertions passing** (43 originally, plus three added
+  2026-07-23 when Tab navigation turned out never to have worked — see below).
+
+### Tab navigation shipped broken, and this repo's own demo hid it (2026-07-23)
+
+`CWindow.Create` defaults its `dwExStyle` parameter to
+`WS_EX_CONTROLPARENT OR WS_EX_WINDOWEDGE`, and `CComboBox_Create` passed only `dwStyle`. The
+control therefore declared itself a **container**; the dialog manager descended into it hunting
+for tabstops, found no children, and **skipped it**. Tab never landed on a combobox.
+
+The Create call's own comment already said *"There is no `WS_EX_CONTROLPARENT` because there is
+no child to see through to"* — an intention that was never implemented, read for months as a
+statement of fact.
+
+**Why the interactive pass missed it, which is the part worth keeping.** The demo also hosts
+three plain Win32 `BUTTON`s (Add / Delete / AutoSize). Tab moved briskly between *those*, so
+focus visibly moved and navigation looked fine. The A/B run makes it explicit — with the bug
+restored, the first tab item the dialog manager reports is **id 1100**, `IDC_FRMMAIN_BTN_ADD`:
+
+| | first tab item | reaches the combobox |
+|---|---|---|
+| bug present | 1100 (a plain `BUTTON`) | no |
+| fixed | 1000 (`ghCombo(0)`) | yes |
+
+**An interactive pass that watches focus move *somewhere* is not a test that it moves
+*everywhere*.** Nothing in the 43 assertions could have caught this either, because none of them
+had ever asked what the dialog manager sees. Three now do: the flag is absent, `WS_TABSTOP` is
+present, and end-to-end that walking `GetNextDlgTabItem` from the parent reaches the control.
+They were A/B verified by reverting the one-token fix (2 failures) and restoring it.
+
+Found while building `CButton`, which inherited the identical defect from this file. **Do not
+generalise the fix**: `CListBox`, `CTextBox`, `CNumericUpDown` and `CScrollPanel` genuinely need
+`WS_EX_CONTROLPARENT` because their tabstop lives on an inner child, and passing `0` there would
+make *them* unreachable. Full write-up in `C:\dev\Learnings.md`.
 - **The interactive pass has been run and passed** (2026-07-23, by the author), including
   `CBO_TEXT_WHENSELECTED` growing from a bare chevron to the full captioned button on the
   first pick. That is what closes the control out: the assertions prove the geometry, and only

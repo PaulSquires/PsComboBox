@@ -519,6 +519,16 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     UpdateWindow( pWindow->hWindow )
     ShowWindow( pWindow->hWindow, SW_SHOW )
 
+    ' Give the first combobox the focus. A real dialog does this in WM_INITDIALOG; an ordinary
+    ' window must do it itself, and without it IsDialogMessage ignores the FIRST Tab entirely --
+    ' it only acts when the focused window is a DESCENDANT of the window it is passed, and at
+    ' startup the focus is on the form.
+    '
+    ' Note it starts on a COMBOBOX rather than on one of the plain buttons below, deliberately:
+    ' those buttons are what masked the WS_EX_CONTROLPARENT bug for so long, since Tab moved
+    ' between them and navigation looked fine while never once reaching a combobox.
+    SetFocus( ghCombo(0) )
+
     ' Process windows events
     dim uMsg as MSG
 

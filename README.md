@@ -206,9 +206,27 @@ Read-modify-write is `GetColors`, assign, `SetColors`.
 
 ## Focus and keyboard
 
-`WS_TABSTOP`, real focus tracking, a painted focus ring. `CToggle` is the only other focusable
-control in the family. Tab *navigation* needs `IsDialogMessage` in the host pump; mouse and —
-once the control has focus — keyboard both work without it.
+`WS_TABSTOP`, real focus tracking, a painted focus ring. `CToggle`, `CNumericUpDown` and
+`CButton` are the other focusable controls in the family. Tab *navigation* needs
+`IsDialogMessage` in the host pump; mouse and — once the control has focus — keyboard both work
+without it.
+
+**Give one of your controls the focus at startup.** `IsDialogMessage` only acts when the focused
+window is a *descendant* of the window you pass it, and when your form opens the focus is on the
+form itself — so the **first Tab does nothing**, which reads exactly like broken tabstops. A real
+dialog does this in `WM_INITDIALOG`; an ordinary `CWindow` host calls `SetFocus( hFirstControl )`
+after `ShowWindow`.
+
+> **Fixed 2026-07-23 — Tab navigation never actually reached a combobox before that.**
+> `CWindow.Create` defaults its `dwExStyle` parameter to
+> `WS_EX_CONTROLPARENT OR WS_EX_WINDOWEDGE`, and `CComboBox_Create` passed only `dwStyle` — so
+> the control declared itself a *container*, the dialog manager descended into it looking for
+> tabstops, found no children, and skipped it. **This repo's own demo hid it**: the demo also
+> hosts three plain Win32 `BUTTON`s, so Tab moved between *those* and the interactive pass saw
+> focus moving and concluded navigation worked. Now passed explicitly as `0`, and asserted three
+> ways in the self-test. Note this fix is **wrong** for
+> `CListBox`/`CTextBox`/`CNumericUpDown`/`CScrollPanel`, which genuinely need the flag; see
+> `C:\dev\Learnings.md`.
 
 `WM_GETDLGCODE` claims `DLGC_WANTALLKEYS` **per-message and only for the keys the control
 consumes**. Claiming unconditionally would swallow Tab and break the navigation the tabstop
