@@ -840,10 +840,26 @@ function CComboBox_Create( byval hWndParent as HWND, byval CtrlID as long ) as H
     dim pWindow as CWindow ptr = New CWindow
 
     ' WS_TABSTOP: this control takes focus. There is no WS_EX_CONTROLPARENT because there is
-    ' no child to see through to -- the tabstop is on this window itself.
+    ' no child to see through to -- the tabstop is on this window itself. The dropdown is a
+    ' separate TOP-LEVEL popup, not a child, so it is not a tab target either.
+    '
+    ' THE TRAILING 0 IS THAT SENTENCE'S IMPLEMENTATION, AND IT WAS MISSING UNTIL 2026-07-23.
+    ' CWindow.Create defaults its dwExStyle parameter to WS_EX_CONTROLPARENT OR
+    ' WS_EX_WINDOWEDGE, so passing only dwStyle -- as this call did -- silently declared the
+    ' control a CONTAINER. The dialog manager then descended into it looking for tabstops,
+    ' found no children, and SKIPPED it: Tab never landed on a combobox. This repo's demo hid
+    ' that, because it also hosts three plain Win32 BUTTONs -- Tab moved between THOSE, so the
+    ' interactive pass saw focus moving and concluded navigation worked.
+    '
+    ' DO NOT COPY THIS INTO A WRAP-A-REAL-CHILD CONTROL. CListBox, CTextBox, CNumericUpDown
+    ' and CScrollPanel all NEED WS_EX_CONTROLPARENT, because their tabstop lives on an inner
+    ' child; passing 0 there would make them unreachable instead. The test is "does this
+    ' window have children the dialog manager should find?", not "is this a control?".
+    ' Full write-up in C:\dev\Learnings.md.
     dim as HWND hCtrl = _
             pWindow->Create( hWndParent, "", @CComboBox_WndProc, _
-            0, 0, 0, 0, WS_CHILD or WS_TABSTOP or WS_CLIPSIBLINGS or WS_CLIPCHILDREN _
+            0, 0, 0, 0, WS_CHILD or WS_TABSTOP or WS_CLIPSIBLINGS or WS_CLIPCHILDREN, _
+            0 _
             )
 
     ' NOTE: CS_DBLCLKS is deliberately NOT enabled here -- see the WndProc header. It would
@@ -2010,6 +2026,43 @@ sub CComboBox_RunSelfTest( byval hWndParent as HWND )
     sD = "bSuppressNextOpen=" & str(pC->bSuppressNextOpen)
     CBOTest_Check( "reopen guard is cleared by one down-click", _
                    (pC->bSuppressNextOpen = false) andalso (pC->isOpen = false), sD )
+
+    ' ---- 13. the control is a tab ITEM, not a tab CONTAINER -----------------------------
+    ' Added 2026-07-23, because this SHIPPED BROKEN. CWindow.Create defaults dwExStyle to
+    ' WS_EX_CONTROLPARENT OR WS_EX_WINDOWEDGE and CComboBox_Create passed only dwStyle, so the
+    ' control declared itself a container; the dialog manager descended into it, found no
+    ' children, and skipped it. None of the 43 assertions above could see that, because nothing
+    ' here had ever asked what the dialog manager sees -- and the demo masked it by also
+    ' hosting plain Win32 BUTTONs for Tab to move between.
+    dim as ulong exStyle = cast( ulong, GetWindowLongPtr( h, GWL_EXSTYLE ) )
+    sD = "exstyle=&h" & hex(exStyle)
+    CBOTest_Check( "NOT a control parent (a leaf control is a tab ITEM)", _
+                   (exStyle and WS_EX_CONTROLPARENT) = 0, sD )
+
+    dim as ulong wsStyle = cast( ulong, GetWindowLongPtr( h, GWL_STYLE ) )
+    sD = "style=&h" & hex(wsStyle)
+    CBOTest_Check( "is a tabstop", (wsStyle and WS_TABSTOP) <> 0, sD )
+
+    ' The end-to-end claim rather than the flag: ask the dialog manager to walk to us. The
+    ' WS_VISIBLE bit is set directly rather than with ShowWindow -- the walk tests the style
+    ' bit, and this way there is no paint, no flash, and no dependence on whether the host runs
+    ' the self-test before or after it shows the form.
+    SetWindowLongPtr( h, GWL_STYLE, cast( LONG_PTR, wsStyle or WS_VISIBLE ) )
+    dim as HWND hFirstTab = GetNextDlgTabItem( hWndParent, 0, FALSE )
+    dim as boolean bReachable = false
+    dim as HWND hScan = hFirstTab
+    for i as long = 0 to 63
+        if hScan = 0 then exit for
+        if hScan = h then
+            bReachable = true
+            exit for
+        end if
+        hScan = GetNextDlgTabItem( hWndParent, hScan, FALSE )
+        if hScan = hFirstTab then exit for          ' wrapped all the way round
+    next
+    SetWindowLongPtr( h, GWL_STYLE, cast( LONG_PTR, wsStyle ) )
+    sD = "first tab item id=" & str(GetDlgCtrlID(hFirstTab)) & " reached=" & str(bReachable)
+    CBOTest_Check( "the dialog manager can reach us by Tab", bReachable, sD )
 
     DestroyWindow(h)
 
