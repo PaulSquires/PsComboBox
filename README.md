@@ -217,6 +217,18 @@ dynamic list with `Clear` + `AddItem`.
 The message callback's result is **ignored for `WM_SETFOCUS` / `WM_KILLFOCUS`**: focus is a fact
 the system reports, not an action to veto.
 
+### One trap when writing a paint callback
+
+Draw the focus ring with **`PaintRoundOutline`**, never `PaintBorderRect`. The latter goes
+through `PaintRectFactory`, which **always fills the rect with `_backcolor`** before stroking
+it — so used for a ring it floods `rcVisual` with whatever colour you last set and wipes the
+chrome, the caption and the chevron you just drew, leaving a solid block. `PaintRoundOutline`
+exists for exactly this case ("stroke over already-painted pixels without filling"); pass
+curvature 0 for a square ring. The built-in painter uses it, and the demo's custom painter
+carries a comment saying why.
+
+The same shape bites anything drawn *over* existing pixels, not just the ring.
+
 ---
 
 ## Two things worth knowing

@@ -214,12 +214,13 @@ sub CComboBox_DemoPaint( byval p as CCOMBOBOX_PAINTINFO ptr )
         p->b->PaintText( p->wszText, @rcT, DT_LEFT or DT_END_ELLIPSIS )
     end if
 
-    ' one solid down-triangle, drawn as a stack of shortening horizontal bars
+    ' one solid down-triangle, drawn as a stack of shortening horizontal bars. An odd cell
+    ' width ends on a single-pixel bar and so comes to a real point; an even one ends two
+    ' pixels wide, which is why the default chevron width is odd.
     dim as long cl = p->rcChevron.left
     dim as long cr = p->rcChevron.right
-    dim as long ct = p->rcChevron.top + (((p->rcChevron.bottom - p->rcChevron.top) - _
-                                          ((cr - cl) \ 2)) \ 2)
-    dim as long rows = (cr - cl) \ 2
+    dim as long rows = ((cr - cl) + 1) \ 2
+    dim as long ct = p->rcChevron.top + (((p->rcChevron.bottom - p->rcChevron.top) - rows) \ 2)
     p->b->SetBackColor( clrLine )
     for i as long = 0 to rows - 1
         dim as RECT rcBar
@@ -227,10 +228,17 @@ sub CComboBox_DemoPaint( byval p as CCOMBOBOX_PAINTINFO ptr )
         p->b->PaintRect( @rcBar )
     next
 
-    ' the focus ring is the built-in painter's job too, so a callback that wants one draws it
+    ' The focus ring is the built-in painter's job too, so a callback that wants one draws it.
+    '
+    ' PaintRoundOutline, NOT PaintBorderRect. PaintBorderRect goes through PaintRectFactory,
+    ' which ALWAYS fills the rect with _backcolor before stroking it -- so used here it would
+    ' flood rcVisual with whatever colour was last set (the triangle's, just above) and wipe
+    ' the chrome, the caption and the triangle, leaving a solid block. PaintRoundOutline
+    ' exists for exactly this case: stroke over already-painted pixels without filling.
+    ' Curvature 0 gives the square outline this square chrome wants.
     if p->isFocused then
         p->b->SetPenColor( theme.FocusAccent )
-        p->b->PaintBorderRect( @p->rcVisual, 1 )
+        p->b->PaintRoundOutline( @p->rcVisual, 0, 1 )
     end if
 end sub
 
