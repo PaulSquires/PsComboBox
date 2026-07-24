@@ -1,4 +1,4 @@
-# CComboBox
+# PsComboBox
 
 An owner-drawn dropdown selector for FreeBASIC Win32 applications: a button showing the
 current choice with a stacked up/down chevron on its right, which drops a list of the
@@ -13,7 +13,7 @@ is one you can set.
 The button has no label of its own. It shows the selected item's caption (or a placeholder, or
 nothing at all), so a field label goes beside it, positioned by you.
 
-The dropdown is a **CPopupMenu** — a second, top-level window that the control creates and owns.
+The dropdown is a **PsPopupMenu** — a second, top-level window that the control creates and owns.
 That is where the two obligations in *Requirements* come from, and it is the source of several
 entries in *Behaviour and limits*: in particular, **the list does not scroll**.
 
@@ -21,7 +21,7 @@ entries in *Behaviour and limits*: in particular, **the list does not scroll**.
 
 ## What it looks like
 
-![The CComboBox demo](CComboBox.png)
+![The PsComboBox demo](PsComboBox.png)
 
 Seven rows: the reference two-item case carrying the focus ring, arrow-only, disabled, a placeholder with nothing selected, a mutable list, a host-painted square variant with a solid triangle, and collapse-until-answered. The button's width comes from the **widest item**, never the selected one, so picking never resizes it. The three plain buttons at the bottom are ordinary Win32 host buttons driving the list.
 
@@ -33,14 +33,14 @@ Seven rows: the reference two-item case carrying the focus ring, arrow-only, dis
 
 | File | Purpose |
 |---|---|
-| `CComboBox.bi` | Declarations — types, callbacks, constants, function prototypes |
-| `CComboBox.inc` | Implementation |
-| `CPopupMenu.bi` | The floating list the control drops |
-| `CPopupMenu.inc` | Its implementation |
-| `CBufferPaint.bi` | The flicker-free drawing surface both controls paint through |
-| `CBufferPaint.inc` | Its implementation |
+| `PsComboBox.bi` | Declarations — types, callbacks, constants, function prototypes |
+| `PsComboBox.inc` | Implementation |
+| `PsPopupMenu.bi` | The floating list the control drops |
+| `PsPopupMenu.inc` | Its implementation |
+| `PsBufferPaint.bi` | The flicker-free drawing surface both controls paint through |
+| `PsBufferPaint.inc` | Its implementation |
 
-**AfxNova is required.** The control is built on `CWindow`, and `CBufferPaint` draws through
+**AfxNova is required.** The control is built on `CWindow`, and `PsBufferPaint` draws through
 `AfxNova\CGdiPlus.inc`. Sources include AfxNova relative to the workspace root
 (`#include once "AfxNova\CWindow.inc"`), so builds need the workspace root on the include path:
 
@@ -48,17 +48,17 @@ Seven rows: the reference two-item case carrying the focus ring, arrow-only, dis
 fbc64.exe -i "C:\dev" main.bas
 ```
 
-**Include order.** `CComboBox.bi` includes **both** of its dependencies itself, so there is no
+**Include order.** `PsComboBox.bi` includes **both** of its dependencies itself, so there is no
 declaration-order trap to fall into. The three implementation files are included in dependency
 order:
 
 ```freebasic
-#include once "CBufferPaint.inc"
-#include once "CPopupMenu.inc"
-#include once "CComboBox.inc"
+#include once "PsBufferPaint.inc"
+#include once "PsPopupMenu.inc"
+#include once "PsComboBox.inc"
 ```
 
-If your project already vendors `CPopupMenu`, you keep one copy: `#include once` dedupes by
+If your project already vendors `PsPopupMenu`, you keep one copy: `#include once` dedupes by
 resolved path.
 
 **GDI+ must be running before the first repaint and must outlive the last one.** Both controls
@@ -71,7 +71,7 @@ AfxGdipShutdown( gdipToken )
 ```
 
 `AfxGdipShutdown` must come after every window is destroyed, because each repaint builds and
-tears down a `CBufferPaint`.
+tears down a `PsBufferPaint`.
 
 **Never name an identifier `ok`.** GDI+ defines `Ok = 0` as a `Status` enum value in namespace
 `AfxNova`, and hosts customarily say `using AfxNova`. An existing variable, parameter or
@@ -80,7 +80,7 @@ instead.
 
 ### The message-pump contract — this one is mandatory
 
-**Call `CComboBox_FilterMessage` once per combobox, first, in your message pump.**
+**Call `PsComboBox_FilterMessage` once per combobox, first, in your message pump.**
 
 ```freebasic
 do while GetMessage( @uMsg, null, 0, 0 )
@@ -88,7 +88,7 @@ do while GetMessage( @uMsg, null, 0, 0 )
 
     dim as boolean bEaten = false
     for i as long = 0 to COMBO_COUNT - 1
-        if CComboBox_FilterMessage( ghCombo(i), @uMsg ) then
+        if PsComboBox_FilterMessage( ghCombo(i), @uMsg ) then
             bEaten = true
             exit for
         end if
@@ -105,7 +105,7 @@ loop
 Each call returns FALSE immediately when that control's list is closed, so calling it for every
 combobox on the form costs nothing measurable.
 
-**What breaks without it.** The dropdown lives in `CPopupMenu`, and `CPopupMenu` puts its
+**What breaks without it.** The dropdown lives in `PsPopupMenu`, and `PsPopupMenu` puts its
 keyboard navigation and its outside-click dismissal in the filter. A host that never calls it
 gets a list that opens and paints correctly, and that can still be clicked, but that **cannot be
 driven from the keyboard and never dismisses when you click somewhere else**. Escape stops
@@ -114,13 +114,13 @@ sensibly as it can — a `WM_KEYDOWN` arriving while the list is open is swallow
 moving the selection behind a list still showing the old checkmark, and the button still opens
 and closes on alternate clicks — but there is no way to recover the navigation.
 
-**The one-shot reopen guard is the other half of that call.** `CPopupMenu`'s own filter dismisses
+**The one-shot reopen guard is the other half of that call.** `PsPopupMenu`'s own filter dismisses
 the chain on an outside click and then returns FALSE *on purpose*, so the click still reaches
 whatever it landed on ("clicking a toolbar button while a menu is open both closes the menu and
 presses the button"). For a click on the combobox's **own button** that is exactly wrong: the
 list would close in the filter, and the `WM_LBUTTONDOWN` that follows would immediately reopen
 it — making the button impossible to close by clicking. So when the click is ours and the list is
-open, `CComboBox_FilterMessage` arms a one-shot flag which the very next `WM_LBUTTONDOWN` consumes
+open, `PsComboBox_FilterMessage` arms a one-shot flag which the very next `WM_LBUTTONDOWN` consumes
 and clears. It is deterministic: no timer, no close-time heuristic, and it cannot mis-fire,
 because the first down-click that sees it clears it unconditionally.
 
@@ -142,26 +142,26 @@ nothing, which is indistinguishable from the tabstops being broken.
 
 ```freebasic
 ' Create it. The control is created zero-sized and hidden.
-dim as HWND hCombo = CComboBox_Create( hWndParent, IDC_MYFORM_COMBO )
+dim as HWND hCombo = PsComboBox_Create( hWndParent, IDC_MYFORM_COMBO )
 
 ' The font is BORROWED — you keep it and destroy it. It is also the measuring font, and it
 ' is handed straight to the dropdown, so button and list can never disagree about widths.
-CComboBox_SetFont( hCombo, ghFont(GUIFONT_10) )
+PsComboBox_SetFont( hCombo, ghFont(GUIFONT_10) )
 
 ' Be told when the user picks something.
-CComboBox_SetSelChangeCallback( hCombo, @MyCombo_SelChange )
+PsComboBox_SetSelChangeCallback( hCombo, @MyCombo_SelChange )
 
 ' Fill it. AddItem returns the new index; the third argument is a free-form host id.
-CComboBox_AddItem( hCombo, "Add to Existing Window", 1 )
-CComboBox_AddItem( hCombo, "Open a New Window", 2 )
+PsComboBox_AddItem( hCombo, "Add to Existing Window", 1 )
+PsComboBox_AddItem( hCombo, "Open a New Window", 2 )
 
 ' Set the initial choice. This is silent — the callback above does not fire.
-CComboBox_SetCurSel( hCombo, 0 )
+PsComboBox_SetCurSel( hCombo, 0 )
 
 ' Ask how big it wants to be, then place it. GetIdealSize is valid immediately, before the
 ' control has ever been sized.
 dim as long iw, ih
-CComboBox_GetIdealSize( hCombo, iw, ih )
+PsComboBox_GetIdealSize( hCombo, iw, ih )
 SetWindowPos( hCombo, 0, x, y, iw, ih, SWP_NOZORDER )
 
 ShowWindow( hCombo, SW_SHOW )
@@ -172,8 +172,8 @@ And the callback:
 ```freebasic
 sub MyCombo_SelChange( byval hCombo as HWND, byval idxOld as long, byval idxNew as long )
     ' Fired only for user action: a pick from the list, or an arrow / Home / End key.
-    ' The control's state is already updated, so CComboBox_GetCurSel( hCombo ) = idxNew.
-    gConfig.OpenMode = CComboBox_GetItemID( hCombo, idxNew )
+    ' The control's state is already updated, so PsComboBox_GetCurSel( hCombo ) = idxNew.
+    gConfig.OpenMode = PsComboBox_GetItemID( hCombo, idxNew )
 end sub
 ```
 
@@ -186,14 +186,14 @@ refinement.
 
 ### The handle is a real HWND
 
-`CComboBox_Create` returns an ordinary window handle, and every `CComboBox_*` function takes it.
+`PsComboBox_Create` returns an ordinary window handle, and every `PsComboBox_*` function takes it.
 It is not an opaque type, so you can treat the control as the window it is — `SetWindowPos` to
 place and size it, `ShowWindow` to show it, `GetDlgItem` to find it by the `CtrlID` you passed at
 creation.
 
 ### It is created zero-sized and hidden
 
-`CComboBox_Create` gives the control the styles `WS_CHILD`, `WS_TABSTOP`, `WS_CLIPSIBLINGS` and
+`PsComboBox_Create` gives the control the styles `WS_CHILD`, `WS_TABSTOP`, `WS_CLIPSIBLINGS` and
 `WS_CLIPCHILDREN`, and **no extended style at all**. `WS_VISIBLE` is deliberately absent, so a
 newly created control shows nothing until you size it and call `ShowWindow`. That lets you build
 and configure a control before it is ever seen.
@@ -205,9 +205,9 @@ tabstops, find no children, and skip it — Tab would never land on the combobox
 ### Two windows, one of them not a child
 
 The button is the control. The **dropdown is a separate top-level `WS_POPUP` window**, a
-`CPopupMenu` owned by your top-level frame rather than parented to the combobox. It is created
-lazily on the first open (or on the first call to `CComboBox_EnsureList`,
-`CComboBox_SetListColors` or `CComboBox_SetListItemHeight`) and destroyed with the control — so a
+`PsPopupMenu` owned by your top-level frame rather than parented to the combobox. It is created
+lazily on the first open (or on the first call to `PsComboBox_EnsureList`,
+`PsComboBox_SetListColors` or `PsComboBox_SetListItemHeight`) and destroyed with the control — so a
 form with a dozen comboboxes on tabs the user never visits does not create a dozen popup windows
 at startup.
 
@@ -215,12 +215,12 @@ Because it is a popup and not a child, it is not a tab target, and it never take
 
 ### The rows are rebuilt from your items on every open
 
-Nothing incremental happens between the model and the list: every `CComboBox_DropDown` clears the
+Nothing incremental happens between the model and the list: every `PsComboBox_DropDown` clears the
 popup and refills it from the item array, so the two cannot drift. The row ids handed to
-`CPopupMenu` are `(model index + 1)` — never your item's `id` field, which stays a free-form
+`PsPopupMenu` are `(model index + 1)` — never your item's `id` field, which stays a free-form
 payload and never enters the command stream.
 
-That rebuild is also why `CComboBox_GetListHandle` is for appearance only, and why the opening
+That rebuild is also why `PsComboBox_GetListHandle` is for appearance only, and why the opening
 edge of `DropDownCallback` is the right place to rebuild a dynamic list.
 
 ### Geometry is derived, never assigned
@@ -276,7 +276,7 @@ The one place the width *does* move is the `-1` ↔ selected boundary under
 
 ### The ideal size is valid before the control has ever been sized
 
-`CComboBox_GetIdealSize` is what you call to decide how big to make the control in the first
+`PsComboBox_GetIdealSize` is what you call to decide how big to make the control in the first
 place, so it must not need the control to already have a size. The measuring pass runs *ahead of*
 the layout's zero-client bail, which is what makes that work. The rect queries are the other way
 round — they describe placement, so they return FALSE until the control has a client area.
@@ -303,20 +303,20 @@ Every setter afterwards takes raw pixels and expects **you** to scale — typica
 
 The border and focus-ring thicknesses should not be scaled at all: a hairline should stay a
 hairline at any DPI. **The chevron thickness is the deliberate exception**: it is not scaled at
-creation, but `CBufferPaint.PaintLine` scales the pen width it is handed, so the chevron's stroke
+creation, but `PsBufferPaint.PaintLine` scales the pen width it is handed, so the chevron's stroke
 *does* grow on a high-DPI display. A rule is a hairline; a glyph's stroke should grow with the
 glyph.
 
 ### Programmatic changes are silent — with one deliberate exception
 
-`CComboBox_SetCurSel` never fires the selection callback. `SelChangeCallback` reports **user**
+`PsComboBox_SetCurSel` never fires the selection callback. `SelChangeCallback` reports **user**
 action — a pick from the list, or an arrow / Home / End key — and nothing else. This follows
 Win32's own `CB_SETCURSEL` / `CBN_SELCHANGE` split, and it means you can safely call
-`CComboBox_SetCurSel` from inside your own handler without recursing. Every item mutator
+`PsComboBox_SetCurSel` from inside your own handler without recursing. Every item mutator
 (`AddItem`, `InsertItem`, `DeleteItem`, `Clear`, and all the `SetItem*` setters) is silent too.
 
 **`DropDownCallback` is the exception, and it is not an oversight.** It fires for
-`CComboBox_DropDown` and `CComboBox_CloseUp` as well as for user opens, because it reports a
+`PsComboBox_DropDown` and `PsComboBox_CloseUp` as well as for user opens, because it reports a
 *window-state transition* rather than a value change — and a host that rebuilds its item set on
 open needs that hook to run however the list was opened.
 
@@ -348,8 +348,8 @@ jump the user back to the first with no list visible to explain it. Disabled ite
 From "nothing selected", Up lands on the last selectable item — the only sensible answer when
 there is no current position to step back from.
 
-With the list **open**, the keyboard belongs to `CPopupMenu`'s filter, which is one more reason
-the pump call matters. Note that `CPopupMenu`'s own arrow navigation *wraps* — a menu convention,
+With the list **open**, the keyboard belongs to `PsPopupMenu`'s filter, which is one more reason
+the pump call matters. Note that `PsPopupMenu`'s own arrow navigation *wraps* — a menu convention,
 and deliberately different from the closed-list behaviour above.
 
 The control answers `WM_GETDLGCODE` with `DLGC_WANTALLKEYS` only for Up, Down, Home, End, F4,
@@ -360,7 +360,7 @@ button before the control ever saw it.
 
 ### Enabling and disabling is real, not cosmetic
 
-`CComboBox_SetEnabled` calls `EnableWindow`. A disabled window receives no mouse input at all and
+`PsComboBox_SetEnabled` calls `EnableWindow`. A disabled window receives no mouse input at all and
 the dialog manager's Tab skips it, so there is no way for a click or a keystroke to get past a
 cosmetic check. If you call `EnableWindow` on the control directly, the control notices and greys
 itself, so the two routes cannot disagree. Disabling also closes an open list and clears hover
@@ -389,10 +389,10 @@ control lives and destroy it yourself afterwards.
 Firm properties of the control, not settings:
 
 - **The dropdown does not scroll. This is a dozen-item control, not a fifty-item one.**
-  `CPopupMenu` clamps to the monitor work area, so a list taller than the work area is **clipped
+  `PsPopupMenu` clamps to the monitor work area, so a list taller than the work area is **clipped
   and its tail is unreachable** — there is no scrollbar, no wheel scrolling and no keyboard route
   to the hidden rows. If your list can grow past a screenful, this is the wrong control.
-- **The checkmark sits in a fixed left gutter.** `CPopupMenu` reserves a 30px check column on the
+- **The checkmark sits in a fixed left gutter.** `PsPopupMenu` reserves a 30px check column on the
   left of every row and a 20px column on the right, with no setters for either, so rows read like
   a Windows menu — check on the left, and a reserved-but-unused column on the right — rather than
   as a right-aligned tick.
@@ -401,7 +401,7 @@ Firm properties of the control, not settings:
   the next non-paint touch of A (a mouse move, a focus change, its hover tick, or any state
   query). A's painted state is corrected immediately; only the callback is late. Host callbacks
   are never run from inside `WM_PAINT`, which is what forces that deferral.
-- **`CComboBox_DropDown` fails on an empty list.** With no items there is nothing to show, so it
+- **`PsComboBox_DropDown` fails on an empty list.** With no items there is nothing to show, so it
   returns FALSE. It fires the opening callback first and then a matching closing one, so the
   callback's open/close pairing always holds even when the open fails.
 - **Double-clicks are not special.** `CS_DBLCLKS` is deliberately off, so a rapid second click
@@ -416,9 +416,9 @@ Firm properties of the control, not settings:
 - **No hit-test function.** The entire client rectangle opens the list, so a hit test could only
   ever return TRUE for points the caller already knows are inside.
 - **Arrow keys clamp, they do not wrap** — while the list is closed. The open list, being a
-  `CPopupMenu`, wraps.
+  `PsPopupMenu`, wraps.
 - **The right mouse button is reported, never acted on.** A context menu is your business.
-- **`CComboBox_GetListHandle` is for appearance only.** Adding, deleting or re-ordering rows
+- **`PsComboBox_GetListHandle` is for appearance only.** Adding, deleting or re-ordering rows
   through it is not supported: the rows are rebuilt from your items on every open, so your changes
   vanish at the next open at best. The checkmark is placed by the control from its own selection.
 - **Invalid text-mode values are ignored**, leaving the current mode in place, rather than laying
@@ -427,7 +427,7 @@ Firm properties of the control, not settings:
   computed honestly rather than squeezed: the chevron keeps its size and stays pinned to the
   right, and the caption box degenerates to an empty rect rather than a negative one. So a
   too-narrow combobox loses its caption and keeps its arrow, which is the useful failure.
-- **`CComboBox_FindItemByText` compares through a 1024-character buffer**, so captions longer than
+- **`PsComboBox_FindItemByText` compares through a 1024-character buffer**, so captions longer than
   1023 characters are compared on their first 1023 characters only.
 
 ---
@@ -438,7 +438,7 @@ Firm properties of the control, not settings:
 
 | Function | Description |
 |---|---|
-| `CComboBox_Create( hWndParent, CtrlID ) as HWND` | Creates the control as a child of `hWndParent` and returns its window handle. `CtrlID` becomes the window's `GWLP_ID`, so `GetDlgItem` finds it. Created zero-sized and hidden — size it with `CComboBox_GetIdealSize`, place it with `SetWindowPos`, then `ShowWindow`. No extended style is applied, deliberately. |
+| `PsComboBox_Create( hWndParent, CtrlID ) as HWND` | Creates the control as a child of `hWndParent` and returns its window handle. `CtrlID` becomes the window's `GWLP_ID`, so `GetDlgItem` finds it. Created zero-sized and hidden — size it with `PsComboBox_GetIdealSize`, place it with `SetWindowPos`, then `ShowWindow`. No extended style is applied, deliberately. |
 
 ### Items
 
@@ -447,44 +447,44 @@ are silent** — no callbacks, no notifications.
 
 | Function | Description |
 |---|---|
-| `CComboBox_AddItem( hCombo, Text, id = 0, itemData = 0 ) as long` | Appends an item and returns its index, or -1 on failure. Cannot move an existing index, so the selection is untouched. It does **not** auto-select the first item — -1 is a legal state here. `id` and `itemData` are free-form host payloads; `id` never enters the command stream. |
-| `CComboBox_InsertItem( hCombo, idx, Text, id = 0, itemData = 0 ) as long` | Inserts **before** `idx`, shifting the tail up. `idx` equal to the count appends. Returns `idx`, or -1 for an out-of-range index. A selection at or after `idx` moves up by one. |
-| `CComboBox_DeleteItem( hCombo, idx ) as boolean` | Removes one item. Deleting the **current** item clears the selection to -1 rather than sliding it onto a neighbour; a selection after `idx` moves down by one. FALSE for an invalid index. |
-| `CComboBox_Clear( hCombo )` | Removes everything and clears the selection to -1. |
-| `CComboBox_GetCount( hCombo ) as long` | Number of items. |
-| `CComboBox_IsValidItem( hCombo, idx ) as boolean` | TRUE when `idx` is in range. |
-| `CComboBox_GetItemText( hCombo, idx ) as DWSTRING` | The item's caption, or `""` for an invalid index. |
-| `CComboBox_SetItemText( hCombo, idx, Text ) as boolean` | Sets the caption and **re-measures**, so this can change the button's ideal width — and, with auto-size on, the button itself. FALSE for an invalid index. |
-| `CComboBox_GetItemID( hCombo, idx ) as long` | The host id, or 0 for an invalid index. |
-| `CComboBox_SetItemID( hCombo, idx, id ) as boolean` | Sets the host id. No repaint — nothing draws it. |
-| `CComboBox_GetItemData( hCombo, idx ) as integer` | The host payload, or 0 for an invalid index. |
-| `CComboBox_SetItemData( hCombo, idx, itemData ) as boolean` | Sets the host payload. No repaint. |
-| `CComboBox_GetItemEnabled( hCombo, idx ) as boolean` | The item's enabled state. |
-| `CComboBox_SetItemEnabled( hCombo, idx, bEnabled ) as boolean` | A disabled item is greyed in the list, is not selectable by mouse or keyboard, and is skipped by the arrow keys — but it still counts for indexing and **still contributes its width**. **Disabling the current item clears the selection to -1**, because the user could not restore it once they moved off (and `SetCurSel` refuses to put it back). |
-| `CComboBox_FindItemByID( hCombo, id ) as long` | Index of the **first** item carrying this id, or -1. |
-| `CComboBox_FindItemByText( hCombo, Text ) as long` | Index of the **first** item with this exact caption, case-insensitively, or -1. Compared through a 1024-character buffer. |
+| `PsComboBox_AddItem( hCombo, Text, id = 0, itemData = 0 ) as long` | Appends an item and returns its index, or -1 on failure. Cannot move an existing index, so the selection is untouched. It does **not** auto-select the first item — -1 is a legal state here. `id` and `itemData` are free-form host payloads; `id` never enters the command stream. |
+| `PsComboBox_InsertItem( hCombo, idx, Text, id = 0, itemData = 0 ) as long` | Inserts **before** `idx`, shifting the tail up. `idx` equal to the count appends. Returns `idx`, or -1 for an out-of-range index. A selection at or after `idx` moves up by one. |
+| `PsComboBox_DeleteItem( hCombo, idx ) as boolean` | Removes one item. Deleting the **current** item clears the selection to -1 rather than sliding it onto a neighbour; a selection after `idx` moves down by one. FALSE for an invalid index. |
+| `PsComboBox_Clear( hCombo )` | Removes everything and clears the selection to -1. |
+| `PsComboBox_GetCount( hCombo ) as long` | Number of items. |
+| `PsComboBox_IsValidItem( hCombo, idx ) as boolean` | TRUE when `idx` is in range. |
+| `PsComboBox_GetItemText( hCombo, idx ) as DWSTRING` | The item's caption, or `""` for an invalid index. |
+| `PsComboBox_SetItemText( hCombo, idx, Text ) as boolean` | Sets the caption and **re-measures**, so this can change the button's ideal width — and, with auto-size on, the button itself. FALSE for an invalid index. |
+| `PsComboBox_GetItemID( hCombo, idx ) as long` | The host id, or 0 for an invalid index. |
+| `PsComboBox_SetItemID( hCombo, idx, id ) as boolean` | Sets the host id. No repaint — nothing draws it. |
+| `PsComboBox_GetItemData( hCombo, idx ) as integer` | The host payload, or 0 for an invalid index. |
+| `PsComboBox_SetItemData( hCombo, idx, itemData ) as boolean` | Sets the host payload. No repaint. |
+| `PsComboBox_GetItemEnabled( hCombo, idx ) as boolean` | The item's enabled state. |
+| `PsComboBox_SetItemEnabled( hCombo, idx, bEnabled ) as boolean` | A disabled item is greyed in the list, is not selectable by mouse or keyboard, and is skipped by the arrow keys — but it still counts for indexing and **still contributes its width**. **Disabling the current item clears the selection to -1**, because the user could not restore it once they moved off (and `SetCurSel` refuses to put it back). |
+| `PsComboBox_FindItemByID( hCombo, id ) as long` | Index of the **first** item carrying this id, or -1. |
+| `PsComboBox_FindItemByText( hCombo, Text ) as long` | Index of the **first** item with this exact caption, case-insensitively, or -1. Compared through a 1024-character buffer. |
 
 ### Selection and state
 
 | Function | Description |
 |---|---|
-| `CComboBox_GetCurSel( hCombo ) as long` | The selected model index, or -1 for nothing selected. |
-| `CComboBox_SetCurSel( hCombo, idx ) as boolean` | Sets the selection and repaints. **Silent** — does not fire `SelChangeCallback`. **Refuses a disabled item** (returns FALSE, changes nothing): the user could not have reached that state. `-1` always succeeds; an out-of-range index does not. Returns TRUE when the selection already matched. No re-measure — the width comes from the widest item, not the selected one. |
-| `CComboBox_GetText( hCombo ) as DWSTRING` | What the **button** is currently showing: the selected caption, or the placeholder, or `""`. |
-| `CComboBox_GetEnabled( hCombo ) as boolean` | The control's enabled state. |
-| `CComboBox_SetEnabled( hCombo, isEnabled )` | Enables or disables through `EnableWindow`, so input really stops. Disabling closes an open list and clears hover at once. Does not change the selection. |
-| `CComboBox_GetFocused( hCombo ) as boolean` | TRUE while the control has keyboard focus and is painting its focus ring. |
-| `CComboBox_Refresh( hCombo )` | Marks the layout stale and requests a repaint with background erase. Rarely needed — every setter does this for you. |
+| `PsComboBox_GetCurSel( hCombo ) as long` | The selected model index, or -1 for nothing selected. |
+| `PsComboBox_SetCurSel( hCombo, idx ) as boolean` | Sets the selection and repaints. **Silent** — does not fire `SelChangeCallback`. **Refuses a disabled item** (returns FALSE, changes nothing): the user could not have reached that state. `-1` always succeeds; an out-of-range index does not. Returns TRUE when the selection already matched. No re-measure — the width comes from the widest item, not the selected one. |
+| `PsComboBox_GetText( hCombo ) as DWSTRING` | What the **button** is currently showing: the selected caption, or the placeholder, or `""`. |
+| `PsComboBox_GetEnabled( hCombo ) as boolean` | The control's enabled state. |
+| `PsComboBox_SetEnabled( hCombo, isEnabled )` | Enables or disables through `EnableWindow`, so input really stops. Disabling closes an open list and clears hover at once. Does not change the selection. |
+| `PsComboBox_GetFocused( hCombo ) as boolean` | TRUE while the control has keyboard focus and is painting its focus ring. |
+| `PsComboBox_Refresh( hCombo )` | Marks the layout stale and requests a repaint with background erase. Rarely needed — every setter does this for you. |
 
 ### The dropdown
 
 | Function | Description |
 |---|---|
-| `CComboBox_IsDroppedDown( hCombo ) as boolean` | TRUE while the list is showing. It first re-syncs against the popup's real state, so it can fire a pending `DropDown(false)` callback as a side effect — see the one-chain rule in *Behaviour and limits*. |
-| `CComboBox_DropDown( hCombo ) as boolean` | Opens the list. Returns TRUE if it is open (including when it already was), FALSE if the control is disabled, the item set is **empty**, or the popup could not be shown. The order is guaranteed: the `DropDown(true)` callback fires **first, before a single row is built** — then the rows are rebuilt from your items, the font is re-handed over, the list is widened to at least the button's width, the current row is preselected so keyboard navigation starts where the user is, and the popup is shown below the button chrome with left edges aligned and the borders merged. If it bails after the first step, a matching `DropDown(false)` is fired so the pairing always holds. |
-| `CComboBox_CloseUp( hCombo )` | Closes the list and fires `DropDown(false)` if it was open. Silent when it was already closed. |
-| `CComboBox_FilterMessage( hCombo, pMsg ) as boolean` | **The mandatory pump hook.** Returns TRUE when the message was consumed and your pump must skip Translate/Dispatch. Returns FALSE immediately when this control's list is closed, so calling it per combobox is cheap. It also arms the one-shot reopen guard described in *Requirements*. Safe to call with a stale handle. |
-| `CComboBox_EnsureList( hCombo ) as HWND` | Creates the dropdown window now instead of on the first open, and returns its handle (0 on failure). Only needed when you want to reach the popup through `CComboBox_GetListHandle` **before** the user has ever opened it — `CComboBox_SetListColors` and `CComboBox_SetListItemHeight` call it for you. |
+| `PsComboBox_IsDroppedDown( hCombo ) as boolean` | TRUE while the list is showing. It first re-syncs against the popup's real state, so it can fire a pending `DropDown(false)` callback as a side effect — see the one-chain rule in *Behaviour and limits*. |
+| `PsComboBox_DropDown( hCombo ) as boolean` | Opens the list. Returns TRUE if it is open (including when it already was), FALSE if the control is disabled, the item set is **empty**, or the popup could not be shown. The order is guaranteed: the `DropDown(true)` callback fires **first, before a single row is built** — then the rows are rebuilt from your items, the font is re-handed over, the list is widened to at least the button's width, the current row is preselected so keyboard navigation starts where the user is, and the popup is shown below the button chrome with left edges aligned and the borders merged. If it bails after the first step, a matching `DropDown(false)` is fired so the pairing always holds. |
+| `PsComboBox_CloseUp( hCombo )` | Closes the list and fires `DropDown(false)` if it was open. Silent when it was already closed. |
+| `PsComboBox_FilterMessage( hCombo, pMsg ) as boolean` | **The mandatory pump hook.** Returns TRUE when the message was consumed and your pump must skip Translate/Dispatch. Returns FALSE immediately when this control's list is closed, so calling it per combobox is cheap. It also arms the one-shot reopen guard described in *Requirements*. Safe to call with a stale handle. |
+| `PsComboBox_EnsureList( hCombo ) as HWND` | Creates the dropdown window now instead of on the first open, and returns its handle (0 on failure). Only needed when you want to reach the popup through `PsComboBox_GetListHandle` **before** the user has ever opened it — `PsComboBox_SetListColors` and `PsComboBox_SetListItemHeight` call it for you. |
 
 ### Geometry and layout
 
@@ -493,70 +493,70 @@ change can move the ideal width — re-applies auto-size if you turned it on.
 
 | Function | Description |
 |---|---|
-| `CComboBox_GetTextMode( hCombo ) as long` | `CBO_TEXT_ALWAYS` (the default), `CBO_TEXT_NEVER` or `CBO_TEXT_WHENSELECTED`. |
-| `CComboBox_SetTextMode( hCombo, nTextMode )` | Sets the mode. Values outside the three constants are **ignored**. See *Constants* for what each means and for the width consequence of the third. |
-| `CComboBox_GetShowText( hCombo ) as boolean` | Answers "**is a caption drawn right now**", not "what mode is set" — under `CBO_TEXT_WHENSELECTED` those are different questions, and this is the one a caller can use. |
-| `CComboBox_SetShowText( hCombo, bShowText )` | The two-state convenience over `SetTextMode`: TRUE = `CBO_TEXT_ALWAYS`, FALSE = `CBO_TEXT_NEVER`. It cannot reach `CBO_TEXT_WHENSELECTED` — that mode has no boolean spelling, which is why the enum exists. |
-| `CComboBox_GetAutoSize( hCombo ) as boolean` | Whether the control sizes itself. |
-| `CComboBox_SetAutoSize( hCombo, bAutoSize )` | When TRUE the control `SetWindowPos`es **itself** to its ideal size, preserving its top-left, whenever something that changes that size changes: items, item text, font, text mode, padding, text gap, chevron size, focus ring. Default FALSE — normally the host measures with `GetIdealSize` and sizes. Turning it on applies immediately. **The control owns its size; you still own its position**, so a control that grows in place must be re-placed by you if it is right-aligned. |
-| `CComboBox_GetPadding( hCombo, byref nLeft, nTop, nRight, nBottom )` | The four inner paddings, inside the chrome. |
-| `CComboBox_SetPadding( hCombo, nLeft, nTop, nRight, nBottom )` | Sets them; each clamped to a minimum of 0. Changes the ideal size. |
-| `CComboBox_GetTextGap( hCombo ) as long` | The gap between the caption and the chevron. |
-| `CComboBox_SetTextGap( hCombo, nTextGap )` | Sets it; clamped to a minimum of 0. **Spent only when a caption is drawn** — in arrow-only mode it is not charged at all. |
-| `CComboBox_GetChevronSize( hCombo, byref nWidth, nHeight )` | The chevron cell's size. |
-| `CComboBox_SetChevronSize( hCombo, nWidth, nHeight )` | Sets it; **clamped to a minimum of 2×2**, below which the arms degenerate and the painter would draw a stray bar instead of a chevron. Changes the ideal size. |
-| `CComboBox_GetChevronGap( hCombo ) as long` | The vertical air between the up chevron and the down chevron. |
-| `CComboBox_SetChevronGap( hCombo, nGap )` | Sets it; clamped to a minimum of 0. It lives **inside** the chevron cell, so it changes the two arms' height and never the control's ideal size — repaint only, no re-layout. |
-| `CComboBox_GetChevronThickness( hCombo ) as long` | The chevron's stroke weight. |
-| `CComboBox_SetChevronThickness( hCombo, nThickness )` | Sets it; clamped to a minimum of 1. Repaint only — the arms are drawn inside the cell, so nothing moves. **This is the one thickness that is DPI-scaled**, at paint time, by `CBufferPaint.PaintLine`. |
-| `CComboBox_GetCornerCurvature( hCombo ) as long` | The chrome's corner curvature. |
-| `CComboBox_SetCornerCurvature( hCombo, nCurvature )` | Sets it; clamped to a minimum of 0, where **0 means square corners**. This is an ellipse **diameter**, not a radius — `CBufferPaint` keeps GDI's vocabulary and halves it internally, so 12 draws a 6px radius. Repaint only. |
-| `CComboBox_GetBorderThickness( hCombo ) as long` | The chrome's border thickness. |
-| `CComboBox_SetBorderThickness( hCombo, nThickness )` | Sets it; clamped to a minimum of 0, where **0 means no border at all** (the chrome is then a plain filled rounded rect). Repaint only — the border is drawn inside the chrome. Do not DPI-scale this value. |
-| `CComboBox_GetFocusRing( hCombo, byref nGap, nThickness )` | The gap from the chrome to the focus ring, and the ring's own thickness. |
-| `CComboBox_SetFocusRing( hCombo, nGap, nThickness )` | Sets both; each clamped to a minimum of 0. **Both change the ideal size**, because the ring's band is reserved whether or not the control has focus — which is what stops the button jumping sideways when you Tab onto it. Do not DPI-scale the thickness. |
-| `CComboBox_GetIdealSize( hCombo, byref nWidth, nHeight )` | The measured button size: chrome plus the focus-ring band on every side. Forces a pending layout, and is **valid before the control has ever been sized**. |
-| `CComboBox_GetButtonRect( hCombo, byref rc ) as boolean` | The chrome, in client coordinates. |
-| `CComboBox_GetTextRect( hCombo, byref rc ) as boolean` | The caption box. Returns TRUE with an **empty** rect in arrow-only mode — empty is the honest answer, and reporting failure would conflate "no caption" with "not sized yet". |
-| `CComboBox_GetChevronRect( hCombo, byref rc ) as boolean` | The chevron cell. |
-| `CComboBox_GetVisualRect( hCombo, byref rc ) as boolean` | The chrome inflated by the focus-ring band. |
+| `PsComboBox_GetTextMode( hCombo ) as long` | `CBO_TEXT_ALWAYS` (the default), `CBO_TEXT_NEVER` or `CBO_TEXT_WHENSELECTED`. |
+| `PsComboBox_SetTextMode( hCombo, nTextMode )` | Sets the mode. Values outside the three constants are **ignored**. See *Constants* for what each means and for the width consequence of the third. |
+| `PsComboBox_GetShowText( hCombo ) as boolean` | Answers "**is a caption drawn right now**", not "what mode is set" — under `CBO_TEXT_WHENSELECTED` those are different questions, and this is the one a caller can use. |
+| `PsComboBox_SetShowText( hCombo, bShowText )` | The two-state convenience over `SetTextMode`: TRUE = `CBO_TEXT_ALWAYS`, FALSE = `CBO_TEXT_NEVER`. It cannot reach `CBO_TEXT_WHENSELECTED` — that mode has no boolean spelling, which is why the enum exists. |
+| `PsComboBox_GetAutoSize( hCombo ) as boolean` | Whether the control sizes itself. |
+| `PsComboBox_SetAutoSize( hCombo, bAutoSize )` | When TRUE the control `SetWindowPos`es **itself** to its ideal size, preserving its top-left, whenever something that changes that size changes: items, item text, font, text mode, padding, text gap, chevron size, focus ring. Default FALSE — normally the host measures with `GetIdealSize` and sizes. Turning it on applies immediately. **The control owns its size; you still own its position**, so a control that grows in place must be re-placed by you if it is right-aligned. |
+| `PsComboBox_GetPadding( hCombo, byref nLeft, nTop, nRight, nBottom )` | The four inner paddings, inside the chrome. |
+| `PsComboBox_SetPadding( hCombo, nLeft, nTop, nRight, nBottom )` | Sets them; each clamped to a minimum of 0. Changes the ideal size. |
+| `PsComboBox_GetTextGap( hCombo ) as long` | The gap between the caption and the chevron. |
+| `PsComboBox_SetTextGap( hCombo, nTextGap )` | Sets it; clamped to a minimum of 0. **Spent only when a caption is drawn** — in arrow-only mode it is not charged at all. |
+| `PsComboBox_GetChevronSize( hCombo, byref nWidth, nHeight )` | The chevron cell's size. |
+| `PsComboBox_SetChevronSize( hCombo, nWidth, nHeight )` | Sets it; **clamped to a minimum of 2×2**, below which the arms degenerate and the painter would draw a stray bar instead of a chevron. Changes the ideal size. |
+| `PsComboBox_GetChevronGap( hCombo ) as long` | The vertical air between the up chevron and the down chevron. |
+| `PsComboBox_SetChevronGap( hCombo, nGap )` | Sets it; clamped to a minimum of 0. It lives **inside** the chevron cell, so it changes the two arms' height and never the control's ideal size — repaint only, no re-layout. |
+| `PsComboBox_GetChevronThickness( hCombo ) as long` | The chevron's stroke weight. |
+| `PsComboBox_SetChevronThickness( hCombo, nThickness )` | Sets it; clamped to a minimum of 1. Repaint only — the arms are drawn inside the cell, so nothing moves. **This is the one thickness that is DPI-scaled**, at paint time, by `PsBufferPaint.PaintLine`. |
+| `PsComboBox_GetCornerCurvature( hCombo ) as long` | The chrome's corner curvature. |
+| `PsComboBox_SetCornerCurvature( hCombo, nCurvature )` | Sets it; clamped to a minimum of 0, where **0 means square corners**. This is an ellipse **diameter**, not a radius — `PsBufferPaint` keeps GDI's vocabulary and halves it internally, so 12 draws a 6px radius. Repaint only. |
+| `PsComboBox_GetBorderThickness( hCombo ) as long` | The chrome's border thickness. |
+| `PsComboBox_SetBorderThickness( hCombo, nThickness )` | Sets it; clamped to a minimum of 0, where **0 means no border at all** (the chrome is then a plain filled rounded rect). Repaint only — the border is drawn inside the chrome. Do not DPI-scale this value. |
+| `PsComboBox_GetFocusRing( hCombo, byref nGap, nThickness )` | The gap from the chrome to the focus ring, and the ring's own thickness. |
+| `PsComboBox_SetFocusRing( hCombo, nGap, nThickness )` | Sets both; each clamped to a minimum of 0. **Both change the ideal size**, because the ring's band is reserved whether or not the control has focus — which is what stops the button jumping sideways when you Tab onto it. Do not DPI-scale the thickness. |
+| `PsComboBox_GetIdealSize( hCombo, byref nWidth, nHeight )` | The measured button size: chrome plus the focus-ring band on every side. Forces a pending layout, and is **valid before the control has ever been sized**. |
+| `PsComboBox_GetButtonRect( hCombo, byref rc ) as boolean` | The chrome, in client coordinates. |
+| `PsComboBox_GetTextRect( hCombo, byref rc ) as boolean` | The caption box. Returns TRUE with an **empty** rect in arrow-only mode — empty is the honest answer, and reporting failure would conflate "no caption" with "not sized yet". |
+| `PsComboBox_GetChevronRect( hCombo, byref rc ) as boolean` | The chevron cell. |
+| `PsComboBox_GetVisualRect( hCombo, byref rc ) as boolean` | The chrome inflated by the focus-ring band. |
 
 The four rect queries force any pending layout first, so their results are always current. Each
 returns FALSE — leaving `rc` empty — when the control has no client area yet, which is the case
-between `CComboBox_Create` and the first `SetWindowPos`.
+between `PsComboBox_Create` and the first `SetWindowPos`.
 
 ### Appearance
 
 | Function | Description |
 |---|---|
-| `CComboBox_GetColors( hCombo, pColors as CCOMBOBOX_COLORS ptr )` | Fills your struct with the control's current colours. |
-| `CComboBox_SetColors( hCombo, pColors as CCOMBOBOX_COLORS ptr )` | Copies the whole struct in and repaints with background erase. **Also re-derives the dropdown's colours** from it — unless you have claimed them with `CComboBox_SetListColors`. |
-| `CComboBox_GetFont( hCombo ) as HFONT` | The font you handed in, or 0. |
-| `CComboBox_SetFont( hCombo, hTextFont )` | Sets the font and re-measures. **Borrowed, never owned** — keep it alive and destroy it yourself. It is also the measuring font *and* it is passed straight to the dropdown, so button and list always agree about widths. A paint callback must draw with this same font, or the measured width lies. |
-| `CComboBox_GetPlaceholderText( hCombo ) as DWSTRING` | The placeholder string, or `""`. |
-| `CComboBox_SetPlaceholderText( hCombo, Text )` | The string drawn when nothing is selected; `""` draws nothing. Repaint only — the placeholder is **never measured** and can never change the width. |
-| `CComboBox_GetListHandle( hCombo ) as HWND` | The dropdown's `CPopupMenu` handle, or **0 until the list has been created** (which happens on the first open, or on `CComboBox_EnsureList`). **Appearance only** — every `CPopupMenu_Set*` appearance call is available through it, but adding, deleting or re-ordering rows is not supported: the rows are rebuilt from your items on every open and your changes vanish. The checkmark is placed by the control. |
-| `CComboBox_SetListColors( hCombo, pColors as CPOPUPMENU_COLORS ptr )` | Sets the dropdown's colours directly, creating the list if needed. **This claims them permanently**: from here on `CComboBox_SetColors` will not re-derive them, so an explicit choice is never overwritten by a later theme change. |
-| `CComboBox_SetListItemHeight( hCombo, nItemHeight )` | Sets the dropdown's row height, creating the list if needed. |
+| `PsComboBox_GetColors( hCombo, pColors as PSCOMBOBOX_COLORS ptr )` | Fills your struct with the control's current colours. |
+| `PsComboBox_SetColors( hCombo, pColors as PSCOMBOBOX_COLORS ptr )` | Copies the whole struct in and repaints with background erase. **Also re-derives the dropdown's colours** from it — unless you have claimed them with `PsComboBox_SetListColors`. |
+| `PsComboBox_GetFont( hCombo ) as HFONT` | The font you handed in, or 0. |
+| `PsComboBox_SetFont( hCombo, hTextFont )` | Sets the font and re-measures. **Borrowed, never owned** — keep it alive and destroy it yourself. It is also the measuring font *and* it is passed straight to the dropdown, so button and list always agree about widths. A paint callback must draw with this same font, or the measured width lies. |
+| `PsComboBox_GetPlaceholderText( hCombo ) as DWSTRING` | The placeholder string, or `""`. |
+| `PsComboBox_SetPlaceholderText( hCombo, Text )` | The string drawn when nothing is selected; `""` draws nothing. Repaint only — the placeholder is **never measured** and can never change the width. |
+| `PsComboBox_GetListHandle( hCombo ) as HWND` | The dropdown's `PsPopupMenu` handle, or **0 until the list has been created** (which happens on the first open, or on `PsComboBox_EnsureList`). **Appearance only** — every `PsPopupMenu_Set*` appearance call is available through it, but adding, deleting or re-ordering rows is not supported: the rows are rebuilt from your items on every open and your changes vanish. The checkmark is placed by the control. |
+| `PsComboBox_SetListColors( hCombo, pColors as PSPOPUPMENU_COLORS ptr )` | Sets the dropdown's colours directly, creating the list if needed. **This claims them permanently**: from here on `PsComboBox_SetColors` will not re-derive them, so an explicit choice is never overwritten by a later theme change. |
+| `PsComboBox_SetListItemHeight( hCombo, nItemHeight )` | Sets the dropdown's row height, creating the list if needed. |
 
 To change one colour, read-modify-write:
 
 ```freebasic
-dim as CCOMBOBOX_COLORS clrs
-CComboBox_GetColors( hCombo, @clrs )
+dim as PSCOMBOBOX_COLORS clrs
+PsComboBox_GetColors( hCombo, @clrs )
 clrs.BorderColor    = BGR( 80, 86, 96)
 clrs.BorderColorHot = BGR(110,118,130)
-CComboBox_SetColors( hCombo, @clrs )
+PsComboBox_SetColors( hCombo, @clrs )
 ```
 
 ### Callback registration
 
 | Function | Description |
 |---|---|
-| `CComboBox_SetPaintCallback( hCombo, usersub )` | Installs a renderer that draws the whole **button** instead of the built-in painter. Repaints. The dropdown is painted by `CPopupMenu` — reach that through `CComboBox_GetListHandle`. |
-| `CComboBox_SetMessageCallback( hCombo, userfunc )` | Installs an observer for mouse, focus and key messages. |
-| `CComboBox_SetSelChangeCallback( hCombo, usersub )` | Installs the handler told when the **user** changes the selection. |
-| `CComboBox_SetDropDownCallback( hCombo, usersub )` | Installs the handler told when the list opens or closes — **including programmatically**. |
+| `PsComboBox_SetPaintCallback( hCombo, usersub )` | Installs a renderer that draws the whole **button** instead of the built-in painter. Repaints. The dropdown is painted by `PsPopupMenu` — reach that through `PsComboBox_GetListHandle`. |
+| `PsComboBox_SetMessageCallback( hCombo, userfunc )` | Installs an observer for mouse, focus and key messages. |
+| `PsComboBox_SetSelChangeCallback( hCombo, usersub )` | Installs the handler told when the **user** changes the selection. |
+| `PsComboBox_SetDropDownCallback( hCombo, usersub )` | Installs the handler told when the list opens or closes — **including programmatically**. |
 
 All four are optional and independent.
 
@@ -564,10 +564,10 @@ All four are optional and independent.
 
 ## Colors
 
-The colour surface is one flat struct, `CCOMBOBOX_COLORS`, with eighteen `COLORREF` fields: four
+The colour surface is one flat struct, `PSCOMBOBOX_COLORS`, with eighteen `COLORREF` fields: four
 drawn parts (background, caption, border, chevron) × four moods (idle, hot, open, disabled), plus
 the placeholder colour and the focus ring. Every field ships with a usable dark-theme default, so
-a control you never call `CComboBox_SetColors` on still looks right.
+a control you never call `PsComboBox_SetColors` on still looks right.
 
 | Field | Paints |
 |---|---|
@@ -620,9 +620,9 @@ the caption and the chevron change, and the fill stays put.
 
 ### The dropdown's colours
 
-`CPOPUPMENU_COLORS` ships with no defaults except its separator colour, so a list that is never
+`PSPOPUPMENU_COLORS` ships with no defaults except its separator colour, so a list that is never
 given colours renders black on black. To stop that being the out-of-box experience, the control
-**derives the list's colours from its own** every time `CComboBox_SetColors` runs, and once more
+**derives the list's colours from its own** every time `PsComboBox_SetColors` runs, and once more
 when the list is first created. Theming the button themes the list for free:
 
 | Dropdown field | Taken from |
@@ -639,8 +639,8 @@ The border comes from `BorderColorHot` rather than `BorderColor` because the lat
 to `BackColor` — deriving from it would give the popup an invisible border and no edge at all
 against the window behind it.
 
-Call `CComboBox_SetListColors` to override the whole set. That **claims** the dropdown's colours:
-the derivation stands down permanently for that control, so a later `CComboBox_SetColors` will not
+Call `PsComboBox_SetListColors` to override the whole set. That **claims** the dropdown's colours:
+the derivation stands down permanently for that control, so a later `PsComboBox_SetColors` will not
 overwrite your choice.
 
 ### What the painter draws
@@ -652,7 +652,7 @@ overwrite your choice.
 | Chevron | Four strokes: an up chevron in the top half of the cell and a down chevron in the bottom half, separated by the chevron gap, both apexes pointing **away** from the centre. It is geometry, not a glyph, so it needs no icon font installed and it scales cleanly. A degenerate cell is skipped rather than drawn wrong. |
 | Focus ring | A rounded **outline** over `rcVisual`, drawn only while the control has focus and the ring thickness is above 0. Never a fill — it is drawn over the button, and a filled shape there would erase it. Its curvature is the chrome's plus the band on both sides, which is what keeps the two curves concentric. |
 
-All of it goes through `CBufferPaint`, which renders geometry with GDI+, so the chrome's corners
+All of it goes through `PsBufferPaint`, which renders geometry with GDI+, so the chrome's corners
 and the chevron's diagonals are antialiased. A paint callback gets that same buffer and inherits
 the same antialiased primitives.
 
@@ -667,10 +667,10 @@ type CBO_SelChangeCallbackSub as sub( byval hCombo as HWND, byval idxOld as long
 ```
 
 The **user** changed the selection — a pick from the list, or an arrow / Home / End key while the
-list is closed. Fires **after** the control's state is updated, so `CComboBox_GetCurSel( hCombo )`
+list is closed. Fires **after** the control's state is updated, so `PsComboBox_GetCurSel( hCombo )`
 already equals `idxNew`.
 
-It does not fire for `CComboBox_SetCurSel`, which is what makes it safe to call that setter from
+It does not fire for `PsComboBox_SetCurSel`, which is what makes it safe to call that setter from
 inside this handler. Picking the item that is already current is not a change and fires nothing;
 neither is a refused pick — a disabled item or an out-of-range index is dropped without notifying.
 
@@ -685,7 +685,7 @@ type CBO_DropDownCallbackSub as sub( byval hCombo as HWND, byval isOpen as boole
 
 The list is about to open (`isOpen = TRUE`) or has just closed (`isOpen = FALSE`).
 
-**It fires for programmatic opens too** — `CComboBox_DropDown` and `CComboBox_CloseUp` — unlike the
+**It fires for programmatic opens too** — `PsComboBox_DropDown` and `PsComboBox_CloseUp` — unlike the
 selection callback. It reports a *window-state transition*, not a value change, and a host that
 rebuilds its items on open needs that to run however the list was opened.
 
@@ -697,9 +697,9 @@ notification goes out *before* the selection change, so a host handling both see
 ```freebasic
 sub MyCombo_DropDown( byval hCombo as HWND, byval isOpen as boolean )
     if isOpen = false then exit sub
-    CComboBox_Clear( hCombo )
+    PsComboBox_Clear( hCombo )
     for i as long = 0 to gDocs.Count - 1
-        CComboBox_AddItem( hCombo, gDocs.Name(i), gDocs.ID(i) )
+        PsComboBox_AddItem( hCombo, gDocs.Name(i), gDocs.ID(i) )
     next
 end sub
 ```
@@ -707,25 +707,25 @@ end sub
 ### Paint
 
 ```freebasic
-type CBO_PaintCallbackSub as sub( byval p as CCOMBOBOX_PAINTINFO ptr )
+type CBO_PaintCallbackSub as sub( byval p as PSCOMBOBOX_PAINTINFO ptr )
 ```
 
 Draws the whole **button** instead of the built-in painter. Paint through `p->b`, the control's
 double buffer for this repaint — do not touch the screen DC. This callback owns the button only;
-the dropdown is painted by `CPopupMenu` and is reached through `CComboBox_GetListHandle`.
+the dropdown is painted by `PsPopupMenu` and is reached through `PsComboBox_GetListHandle`.
 
 The control has already filled the client with the current mood's `BackColor` before calling you,
 so a callback that only wants to add something on top does not have to repaint the background.
 
-Draw with the **same font** you handed to `CComboBox_SetFont`: the button's width was measured
+Draw with the **same font** you handed to `PsComboBox_SetFont`: the button's width was measured
 with it, and a different font means the width lies.
 
-`CCOMBOBOX_PAINTINFO` carries everything you need:
+`PSCOMBOBOX_PAINTINFO` carries everything you need:
 
 | Field | Meaning |
 |---|---|
 | `hCombo` | The control, so the callback can query it |
-| `b` | The control's `CBufferPaint` for this repaint (borrowed, not owned) |
+| `b` | The control's `PsBufferPaint` for this repaint (borrowed, not owned) |
 | `rcClient` | The whole client area |
 | `rcButton` | The chrome: `rcClient` deflated by the focus-ring band |
 | `rcText` | The caption box. Empty when `isTextVisible` is FALSE |
@@ -756,13 +756,13 @@ to you as information.
 ### Message
 
 ```freebasic
-type CBO_MessageCallbackFunc as function( byval m as CCOMBOBOX_MESSAGEINFO ptr ) as boolean
+type CBO_MessageCallbackFunc as function( byval m as PSCOMBOBOX_MESSAGEINFO ptr ) as boolean
 ```
 
 Observes messages as they arrive. Return TRUE to suppress the control's own handling of that
 message, FALSE to let it proceed.
 
-`CCOMBOBOX_MESSAGEINFO` carries four fields:
+`PSCOMBOBOX_MESSAGEINFO` carries four fields:
 
 | Field | Meaning |
 |---|---|
@@ -814,7 +814,7 @@ a violation of the widest-item rule: every *selected* state still has the same w
 other, and what changes is the one-time `-1` → selected transition from "unanswered" to
 "answered", which the mode exists to make visible.
 
-The practical consequence: in this mode, either turn on `CComboBox_SetAutoSize`, or re-place the
+The practical consequence: in this mode, either turn on `PsComboBox_SetAutoSize`, or re-place the
 control from your `SelChange` handler. Left at a fixed size, the control keeps its collapsed width
 and the caption arrives ellipsized into a chevron-sized box. A placeholder can never be seen in
 this mode either, since the only state that would show it is the collapsed, caption-less one.
@@ -823,28 +823,28 @@ this mode either, since the only state that would show it is the collapsed, capt
 
 | Constant | Value | Meaning |
 |---|---:|---|
-| `CCOMBOBOX_DEFAULT_PADLEFT` | 12 | Left padding inside the chrome, DPI-scaled at create |
-| `CCOMBOBOX_DEFAULT_PADRIGHT` | 10 | Right padding, DPI-scaled at create |
-| `CCOMBOBOX_DEFAULT_PADTOP` | 6 | Top padding, DPI-scaled at create |
-| `CCOMBOBOX_DEFAULT_PADBOTTOM` | 6 | Bottom padding, DPI-scaled at create |
-| `CCOMBOBOX_DEFAULT_TEXTGAP` | 8 | Caption-to-chevron gap, DPI-scaled at create |
-| `CCOMBOBOX_DEFAULT_CHEVRONW` | 9 | Chevron cell width, DPI-scaled at create. Odd on purpose, so the glyph comes to a point |
-| `CCOMBOBOX_DEFAULT_CHEVRONH` | 12 | Chevron cell height, DPI-scaled at create |
-| `CCOMBOBOX_DEFAULT_CHEVRONGAP` | 3 | Air between the up and down chevrons, DPI-scaled at create |
-| `CCOMBOBOX_DEFAULT_CURVATURE` | 12 | Corner ellipse **diameter** (so a 6px radius), DPI-scaled at create |
-| `CCOMBOBOX_DEFAULT_BORDERTHICK` | 1 | Border thickness, never DPI-scaled |
-| `CCOMBOBOX_DEFAULT_FOCUSGAP` | 2 | Focus-ring gap, DPI-scaled at create |
-| `CCOMBOBOX_DEFAULT_FOCUSTHICK` | 1 | Focus-ring thickness, never DPI-scaled |
+| `PSCOMBOBOX_DEFAULT_PADLEFT` | 12 | Left padding inside the chrome, DPI-scaled at create |
+| `PSCOMBOBOX_DEFAULT_PADRIGHT` | 10 | Right padding, DPI-scaled at create |
+| `PSCOMBOBOX_DEFAULT_PADTOP` | 6 | Top padding, DPI-scaled at create |
+| `PSCOMBOBOX_DEFAULT_PADBOTTOM` | 6 | Bottom padding, DPI-scaled at create |
+| `PSCOMBOBOX_DEFAULT_TEXTGAP` | 8 | Caption-to-chevron gap, DPI-scaled at create |
+| `PSCOMBOBOX_DEFAULT_CHEVRONW` | 9 | Chevron cell width, DPI-scaled at create. Odd on purpose, so the glyph comes to a point |
+| `PSCOMBOBOX_DEFAULT_CHEVRONH` | 12 | Chevron cell height, DPI-scaled at create |
+| `PSCOMBOBOX_DEFAULT_CHEVRONGAP` | 3 | Air between the up and down chevrons, DPI-scaled at create |
+| `PSCOMBOBOX_DEFAULT_CURVATURE` | 12 | Corner ellipse **diameter** (so a 6px radius), DPI-scaled at create |
+| `PSCOMBOBOX_DEFAULT_BORDERTHICK` | 1 | Border thickness, never DPI-scaled |
+| `PSCOMBOBOX_DEFAULT_FOCUSGAP` | 2 | Focus-ring gap, DPI-scaled at create |
+| `PSCOMBOBOX_DEFAULT_FOCUSTHICK` | 1 | Focus-ring thickness, never DPI-scaled |
 
 The chevron's stroke weight has no constant of its own: it defaults to 1 and is set with
-`CComboBox_SetChevronThickness`.
+`PsComboBox_SetChevronThickness`.
 
 ### Internal timer
 
 | Constant | Value | Meaning |
 |---|---:|---|
 | `IDT_CCOMBOBOX_HOTTRACK` | `&hCB80` | Timer id for the hover safety-net poll. Timer ids are per-window, so every instance shares it |
-| `CCOMBOBOX_HOTTRACK_MS` | 100 | Its interval, in milliseconds |
+| `PSCOMBOBOX_HOTTRACK_MS` | 100 | Its interval, in milliseconds |
 
 Neither needs anything from you; they are documented so you do not collide with the id if you
 subclass the control's window.
@@ -853,20 +853,20 @@ subclass the control's window.
 
 ## Related controls
 
-**CComboBox embeds `CPopupMenu` as its dropdown, and uses it unmodified.** That is where the
+**PsComboBox embeds `PsPopupMenu` as its dropdown, and uses it unmodified.** That is where the
 list's window behaviour comes from — a `WS_POPUP` that never takes activation, hover-is-selection,
 keyboard navigation, Escape, outside-click dismissal, and a checkmark per row — and it is also
 where three of this control's limits come from: the fixed left check gutter, the absence of
 scrolling, and the one-open-chain-at-a-time rule. All three are covered in *Behaviour and limits*.
-`CPopupMenu` is also what makes `CComboBox_FilterMessage` mandatory.
+`PsPopupMenu` is also what makes `PsComboBox_FilterMessage` mandatory.
 
 Two neighbours worth knowing about, for when this control is the wrong shape:
 
 - If you need a **long, scrollable list**, this is not it — the dropdown clips at the work area.
-  `CListBox` is the scrolling list control.
+  `PsListBox` is the scrolling list control.
 - If you want a **row of flat labels with exactly one current**, rather than a dropdown, that is
-  `CSelectBar`.
+  `PsSelectBar`.
 
-Both the button and the list paint through `CBufferPaint`, which is why it appears in the file
+Both the button and the list paint through `PsBufferPaint`, which is why it appears in the file
 list even though you never call it directly — except from a paint callback, where it arrives as
 `p->b`.

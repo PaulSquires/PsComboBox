@@ -1,5 +1,5 @@
 #include once "frmMain.bi"
-#include once "CBufferPaint.bi"
+#include once "PsBufferPaint.bi"
 
 
 ' One settings row: the label the form draws, and the combobox that sits at its right.
@@ -45,10 +45,10 @@ end function
 '
 ' The form draws the labels and the hairlines; each combobox paints its own cell. There is
 ' no container window between them -- the same arrangement tiko's Output panel uses for its
-' CSelectBar + CIconPanel pair.
+' PsSelectBar + PsIconPanel pair.
 ' ========================================================================================
 function frmMain_OnPaint( byval hwnd as HWND ) as LRESULT
-    dim as CBufferPaint b
+    dim as PsBufferPaint b
 
     b.BeginDoubleBuffer(hwnd)
     b.SetBackColor( theme.BackColor )
@@ -116,7 +116,7 @@ sub frmMain_PositionCombos( byval hwnd as HWND )
         dim as RECT rcRow = RowRect( hwnd, i )
 
         dim as long iw, ih
-        CComboBox_GetIdealSize( ghCombo(i), iw, ih )
+        PsComboBox_GetIdealSize( ghCombo(i), iw, ih )
         if (iw <= 0) orelse (ih <= 0) then continue for
 
         dim as long x = rc.right - margin - iw
@@ -149,13 +149,13 @@ end sub
 ' Callbacks -- the demo's whole purpose is to prove these fire when they should and stay
 ' silent when they should not, so every one of them prints.
 ' ========================================================================================
-sub CComboBox_DemoSelChange( byval hCombo as HWND, byval idxOld as long, byval idxNew as long )
+sub PsComboBox_DemoSelChange( byval hCombo as HWND, byval idxOld as long, byval idxNew as long )
     dim as string s = "SelChange   ctrl=" & str(GetDlgCtrlID(hCombo)) & _
                       "  " & str(idxOld) & " -> " & str(idxNew)
     ' The caption goes through a plain string first: PRINT on a DWSTRING, or on a
     ' string & wstring concat, interleaves nulls (Learnings.md).
     dim as wstring * 512 wszCaption
-    wszCaption = CComboBox_GetText( hCombo )
+    wszCaption = PsComboBox_GetText( hCombo )
     s &= "   [" & str(wszCaption) & "]"
     print s
 
@@ -171,7 +171,7 @@ sub CComboBox_DemoSelChange( byval hCombo as HWND, byval idxOld as long, byval i
     end if
 end sub
 
-sub CComboBox_DemoDropDown( byval hCombo as HWND, byval isOpen as boolean )
+sub PsComboBox_DemoDropDown( byval hCombo as HWND, byval isOpen as boolean )
     dim as string s = "DropDown    ctrl=" & str(GetDlgCtrlID(hCombo)) & "  open=" & str(isOpen)
     print s
 end sub
@@ -179,10 +179,10 @@ end sub
 ' The mutable row rebuilds itself just-in-time on every open, which is what the opening edge
 ' of the DropDown callback is for. Here it only re-stamps the captions so the hook is visibly
 ' running; a real host would refetch whatever the list reflects.
-sub CComboBox_DemoJITDropDown( byval hCombo as HWND, byval isOpen as boolean )
-    CComboBox_DemoDropDown( hCombo, isOpen )
+sub PsComboBox_DemoJITDropDown( byval hCombo as HWND, byval isOpen as boolean )
+    PsComboBox_DemoDropDown( hCombo, isOpen )
     if isOpen = false then exit sub
-    dim as string s = "  (JIT hook: " & str(CComboBox_GetCount(hCombo)) & " items about to be shown)"
+    dim as string s = "  (JIT hook: " & str(PsComboBox_GetCount(hCombo)) & " items about to be shown)"
     print s
 end sub
 
@@ -191,12 +191,12 @@ end sub
 ' down-triangle instead of the stacked chevrons.
 '
 ' Two contracts this honours, and both matter:
-'   - it draws with the same font handed to CComboBox_SetFont, because the widths were
+'   - it draws with the same font handed to PsComboBox_SetFont, because the widths were
 '     measured with it;
 '   - it uses the rects as handed to it rather than re-deriving insets from rcButton.
 ' The control has already filled the client with the mood's background before calling us.
 ' ========================================================================================
-sub CComboBox_DemoPaint( byval p as CCOMBOBOX_PAINTINFO ptr )
+sub PsComboBox_DemoPaint( byval p as PSCOMBOBOX_PAINTINFO ptr )
     if p = 0 then exit sub
 
     dim as COLORREF clrLine = theme.ForeColor
@@ -260,10 +260,10 @@ end sub
 private sub frmMain_OnCommand_Add( byval hwnd as HWND )
     dim as DWSTRING wszNew = "Runtime item " & str(gNextItemSerial)
     gNextItemSerial += 1
-    dim as long idx = CComboBox_AddItem( ghCombo(COMBO_MUTABLE), wszNew, 500 + gNextItemSerial )
+    dim as long idx = PsComboBox_AddItem( ghCombo(COMBO_MUTABLE), wszNew, 500 + gNextItemSerial )
     dim as string s = "AddItem -> index " & str(idx) & _
-                      ", count=" & str(CComboBox_GetCount(ghCombo(COMBO_MUTABLE))) & _
-                      ", sel=" & str(CComboBox_GetCurSel(ghCombo(COMBO_MUTABLE)))
+                      ", count=" & str(PsComboBox_GetCount(ghCombo(COMBO_MUTABLE))) & _
+                      ", sel=" & str(PsComboBox_GetCurSel(ghCombo(COMBO_MUTABLE)))
     print s
     frmMain_PositionCombos( hwnd )
     InvalidateRect( hwnd, NULL, TRUE )
@@ -273,19 +273,19 @@ end sub
 ' selection that sits after the deletion point, and (when item 0 is itself selected) the
 ' clear-to-minus-one rule.
 private sub frmMain_OnCommand_Delete( byval hwnd as HWND )
-    dim as long nBefore = CComboBox_GetCurSel( ghCombo(COMBO_MUTABLE) )
-    dim as boolean bDone = CComboBox_DeleteItem( ghCombo(COMBO_MUTABLE), 0 )
+    dim as long nBefore = PsComboBox_GetCurSel( ghCombo(COMBO_MUTABLE) )
+    dim as boolean bDone = PsComboBox_DeleteItem( ghCombo(COMBO_MUTABLE), 0 )
     dim as string s = "DeleteItem(0)=" & str(bDone) & _
-                      ", count=" & str(CComboBox_GetCount(ghCombo(COMBO_MUTABLE))) & _
-                      ", sel " & str(nBefore) & " -> " & str(CComboBox_GetCurSel(ghCombo(COMBO_MUTABLE)))
+                      ", count=" & str(PsComboBox_GetCount(ghCombo(COMBO_MUTABLE))) & _
+                      ", sel " & str(nBefore) & " -> " & str(PsComboBox_GetCurSel(ghCombo(COMBO_MUTABLE)))
     print s
     frmMain_PositionCombos( hwnd )
     InvalidateRect( hwnd, NULL, TRUE )
 end sub
 
 private sub frmMain_OnCommand_AutoSize( byval hwnd as HWND )
-    dim as boolean bNew = (CComboBox_GetAutoSize( ghCombo(COMBO_MUTABLE) ) = false)
-    CComboBox_SetAutoSize( ghCombo(COMBO_MUTABLE), bNew )
+    dim as boolean bNew = (PsComboBox_GetAutoSize( ghCombo(COMBO_MUTABLE) ) = false)
+    PsComboBox_SetAutoSize( ghCombo(COMBO_MUTABLE), bNew )
     dim as HWND hBtn = GetDlgItem( hwnd, IDC_FRMMAIN_BTN_AUTOSIZE )
     if hBtn then
         if bNew then
@@ -425,57 +425,57 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     gRows(6).wszNote  = "CBO_TEXT_WHENSELECTED + AutoSize -- arrows only until you pick"
 
     for i as long = 0 to COMBO_COUNT - 1
-        ghCombo(i) = CComboBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_COMBO_FIRST + i )
-        CComboBox_SetFont( ghCombo(i), ghFont(GUIFONT_10) )
-        CComboBox_SetSelChangeCallback( ghCombo(i), @CComboBox_DemoSelChange )
-        CComboBox_SetDropDownCallback( ghCombo(i), @CComboBox_DemoDropDown )
+        ghCombo(i) = PsComboBox_Create( HWND_FRMMAIN, IDC_FRMMAIN_COMBO_FIRST + i )
+        PsComboBox_SetFont( ghCombo(i), ghFont(GUIFONT_10) )
+        PsComboBox_SetSelChangeCallback( ghCombo(i), @PsComboBox_DemoSelChange )
+        PsComboBox_SetDropDownCallback( ghCombo(i), @PsComboBox_DemoDropDown )
     next
 
     ' Row 0 -- the reference screenshot. Programmatic SetCurSel, so NO SelChange line should
     ' appear in the console for it at startup.
-    CComboBox_AddItem( ghCombo(0), "Add to Existing Window", 1 )
-    CComboBox_AddItem( ghCombo(0), "Open a New Window", 2 )
-    CComboBox_SetCurSel( ghCombo(0), 0 )
+    PsComboBox_AddItem( ghCombo(0), "Add to Existing Window", 1 )
+    PsComboBox_AddItem( ghCombo(0), "Open a New Window", 2 )
+    PsComboBox_SetCurSel( ghCombo(0), 0 )
 
     ' Row 1 -- arrow only. It still HAS a selection and the list still checkmarks it; only
     ' the button's caption is suppressed.
-    CComboBox_AddItem( ghCombo(1), "Add to Existing Window", 1 )
-    CComboBox_AddItem( ghCombo(1), "Open a New Window", 2 )
-    CComboBox_SetCurSel( ghCombo(1), 1 )
-    CComboBox_SetShowText( ghCombo(1), false )
+    PsComboBox_AddItem( ghCombo(1), "Add to Existing Window", 1 )
+    PsComboBox_AddItem( ghCombo(1), "Open a New Window", 2 )
+    PsComboBox_SetCurSel( ghCombo(1), 1 )
+    PsComboBox_SetShowText( ghCombo(1), false )
 
     ' Row 2 -- disabled WITH a selection, which is the case the disabled colors exist for:
     ' it must still read as showing a value.
-    CComboBox_AddItem( ghCombo(2), "Add to Existing Window", 1 )
-    CComboBox_AddItem( ghCombo(2), "Open a New Window", 2 )
-    CComboBox_SetCurSel( ghCombo(2), 0 )
-    CComboBox_SetEnabled( ghCombo(2), false )
+    PsComboBox_AddItem( ghCombo(2), "Add to Existing Window", 1 )
+    PsComboBox_AddItem( ghCombo(2), "Open a New Window", 2 )
+    PsComboBox_SetCurSel( ghCombo(2), 0 )
+    PsComboBox_SetEnabled( ghCombo(2), false )
 
     ' Row 3 -- no selection, with a placeholder and one disabled item. The placeholder is
     ' NOT measured, so the button is exactly as wide as it will be once something is picked.
-    CComboBox_AddItem( ghCombo(3), "Add to Existing Window", 1 )
-    CComboBox_AddItem( ghCombo(3), "Open a New Window", 2 )
-    CComboBox_AddItem( ghCombo(3), "Not Available Right Now", 3 )
-    CComboBox_SetItemEnabled( ghCombo(3), 2, false )
-    CComboBox_SetPlaceholderText( ghCombo(3), "Choose an action..." )
+    PsComboBox_AddItem( ghCombo(3), "Add to Existing Window", 1 )
+    PsComboBox_AddItem( ghCombo(3), "Open a New Window", 2 )
+    PsComboBox_AddItem( ghCombo(3), "Not Available Right Now", 3 )
+    PsComboBox_SetItemEnabled( ghCombo(3), 2, false )
+    PsComboBox_SetPlaceholderText( ghCombo(3), "Choose an action..." )
 
     ' Row 4 -- the mutable list, driven by the buttons. It rebuilds just-in-time on open.
-    CComboBox_AddItem( ghCombo(COMBO_MUTABLE), "First item", 501 )
-    CComboBox_AddItem( ghCombo(COMBO_MUTABLE), "Second item", 502 )
-    CComboBox_AddItem( ghCombo(COMBO_MUTABLE), "Third item", 503 )
-    CComboBox_SetCurSel( ghCombo(COMBO_MUTABLE), 1 )
-    CComboBox_SetDropDownCallback( ghCombo(COMBO_MUTABLE), @CComboBox_DemoJITDropDown )
+    PsComboBox_AddItem( ghCombo(COMBO_MUTABLE), "First item", 501 )
+    PsComboBox_AddItem( ghCombo(COMBO_MUTABLE), "Second item", 502 )
+    PsComboBox_AddItem( ghCombo(COMBO_MUTABLE), "Third item", 503 )
+    PsComboBox_SetCurSel( ghCombo(COMBO_MUTABLE), 1 )
+    PsComboBox_SetDropDownCallback( ghCombo(COMBO_MUTABLE), @PsComboBox_DemoJITDropDown )
 
     ' Row 5 -- the built-in painter replaced wholesale, plus square corners so the custom
     ' chrome and the control's own geometry agree.
-    CComboBox_AddItem( ghCombo(5), "Add to Existing Window", 1 )
-    CComboBox_AddItem( ghCombo(5), "Open a New Window", 2 )
-    CComboBox_SetCurSel( ghCombo(5), 0 )
-    CComboBox_SetCornerCurvature( ghCombo(5), 0 )
-    CComboBox_SetPaintCallback( ghCombo(5), @CComboBox_DemoPaint )
-    ' The list is themed independently here, which also claims it: later CComboBox_SetColors
+    PsComboBox_AddItem( ghCombo(5), "Add to Existing Window", 1 )
+    PsComboBox_AddItem( ghCombo(5), "Open a New Window", 2 )
+    PsComboBox_SetCurSel( ghCombo(5), 0 )
+    PsComboBox_SetCornerCurvature( ghCombo(5), 0 )
+    PsComboBox_SetPaintCallback( ghCombo(5), @PsComboBox_DemoPaint )
+    ' The list is themed independently here, which also claims it: later PsComboBox_SetColors
     ' calls will no longer re-derive the dropdown's colors for this control.
-    dim as CPOPUPMENU_COLORS lc
+    dim as PSPOPUPMENU_COLORS lc
     lc.BackColor         = theme.BackColor
     lc.ForeColor         = theme.ForeColor
     lc.BackColorHot      = theme.BackColorSelect
@@ -483,17 +483,17 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     lc.ForeColorDisabled = theme.ForeColorDisabled
     lc.BorderColor       = theme.FocusAccent
     lc.SeparatorColor    = theme.Divider
-    CComboBox_SetListColors( ghCombo(5), @lc )
+    PsComboBox_SetListColors( ghCombo(5), @lc )
 
     ' Row 6 -- the requested behaviour: no selection, so the button is JUST the chevron; make
     ' a choice and it becomes an ordinary captioned combobox. Auto-size is on so the control
     ' applies the new width itself; the shared SelChange handler re-places it so it stays
     ' right-aligned as it grows. Deliberately NO placeholder -- in this mode one could never
     ' be seen, since the only state that would show it is the collapsed, caption-less one.
-    CComboBox_AddItem( ghCombo(COMBO_WHENSEL), "Add to Existing Window", 1 )
-    CComboBox_AddItem( ghCombo(COMBO_WHENSEL), "Open a New Window", 2 )
-    CComboBox_SetTextMode( ghCombo(COMBO_WHENSEL), CBO_TEXT_WHENSELECTED )
-    CComboBox_SetAutoSize( ghCombo(COMBO_WHENSEL), true )
+    PsComboBox_AddItem( ghCombo(COMBO_WHENSEL), "Add to Existing Window", 1 )
+    PsComboBox_AddItem( ghCombo(COMBO_WHENSEL), "Open a New Window", 2 )
+    PsComboBox_SetTextMode( ghCombo(COMBO_WHENSEL), CBO_TEXT_WHENSELECTED )
+    PsComboBox_SetAutoSize( ghCombo(COMBO_WHENSEL), true )
 
     ' The three push buttons. Plain Win32 BUTTONs -- this demo is about the combobox.
     pWindow->AddControl( "Button", HWND_FRMMAIN, IDC_FRMMAIN_BTN_ADD, "Add item", 0, 0, 10, 10 )
@@ -501,10 +501,10 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
     pWindow->AddControl( "Button", HWND_FRMMAIN, IDC_FRMMAIN_BTN_AUTOSIZE, "AutoSize: OFF", 0, 0, 10, 10 )
 
     dim as long iw, ih
-    CComboBox_GetIdealSize( ghCombo(0), iw, ih )
+    PsComboBox_GetIdealSize( ghCombo(0), iw, ih )
     dim as string s = "row 0 ideal size: " & str(iw) & "x" & str(ih)
     print s
-    CComboBox_GetIdealSize( ghCombo(1), iw, ih )
+    PsComboBox_GetIdealSize( ghCombo(1), iw, ih )
     s = "row 1 ideal size (arrow only): " & str(iw) & "x" & str(ih)
     print s
 
@@ -513,8 +513,8 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
         ShowWindow( ghCombo(i), SW_SHOW )
     next
 
-    ' Self-gated on CCOMBOBOX_SELFTEST=1.
-    CComboBox_RunSelfTest( HWND_FRMMAIN )
+    ' Self-gated on PSCOMBOBOX_SELFTEST=1.
+    PsComboBox_RunSelfTest( HWND_FRMMAIN )
 
     UpdateWindow( pWindow->hWindow )
     ShowWindow( pWindow->hWindow, SW_SHOW )
@@ -542,7 +542,7 @@ function frmMain_Show( byval hWndParent as HWND ) as LRESULT
         ' it just dismissed. Each call returns immediately when that control's list is closed.
         dim as boolean bEaten = false
         for i as long = 0 to COMBO_COUNT - 1
-            if CComboBox_FilterMessage( ghCombo(i), @uMsg ) then
+            if PsComboBox_FilterMessage( ghCombo(i), @uMsg ) then
                 bEaten = true
                 exit for
             end if

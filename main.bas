@@ -1,5 +1,5 @@
 ' ========================================================================================
-' CComboBox - demo harness
+' PsComboBox - demo harness
 ' ========================================================================================
 
 #define UNICODE
@@ -46,9 +46,9 @@ dim shared theme as THEME_TYPE
 
 
 
-#include once "CBufferPaint.inc"
-#include once "CPopupMenu.inc"
-#include once "CComboBox.inc"
+#include once "PsBufferPaint.inc"
+#include once "PsPopupMenu.inc"
+#include once "PsComboBox.inc"
 #include once "frmMain.inc"
 
 
@@ -66,7 +66,7 @@ function WinMain( _
     ' Initialize the COM library
     CoInitialize(null)
 
-    ' Initialize GDI+ (CBufferPaint draws all geometry through it). Must be running before
+    ' Initialize GDI+ (PsBufferPaint draws all geometry through it). Must be running before
     ' the first WM_PAINT builds a buffer, and must outlive every one of them, so it brackets
     ' frmMain_Show.
     dim as ULONG_PTR gdipToken = AfxGdipInit()
@@ -74,7 +74,7 @@ function WinMain( _
     ' Show the main form
     function = frmMain_Show( 0 )
 
-    ' Every window is destroyed and every CBufferPaint has run its destructor by here, so no
+    ' Every window is destroyed and every PsBufferPaint has run its destructor by here, so no
     ' CGp* object can still be alive. Precedes CoUninitialize: GDI+ leans on COM.
     AfxGdipShutdown( gdipToken )
 
