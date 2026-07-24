@@ -19,6 +19,14 @@ entries in *Behaviour and limits*: in particular, **the list does not scroll**.
 
 ---
 
+## What it looks like
+
+![The CComboBox demo](CComboBox.png)
+
+Seven rows: the reference two-item case carrying the focus ring, arrow-only, disabled, a placeholder with nothing selected, a mutable list, a host-painted square variant with a solid triangle, and collapse-until-answered. The button's width comes from the **widest item**, never the selected one, so picking never resizes it. The three plain buttons at the bottom are ordinary Win32 host buttons driving the list.
+
+---
+
 ## Requirements
 
 **Files to copy into your project:**
