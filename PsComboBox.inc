@@ -1,20 +1,20 @@
 ''
-''  CComboBox.inc  --  owner-drawn dropdown selector (button + checkmarked list)
+''  PsComboBox.inc  --  owner-drawn dropdown selector (button + checkmarked list)
 ''
 
-#include once "CComboBox.bi"
+#include once "PsComboBox.bi"
 
 
 ' Forward declaration: the selection setters need to re-apply auto-size when a
 ' CBO_TEXT_WHENSELECTED button crosses the -1 boundary, and they are defined well above the
 ' layout section where this lives.
-declare sub CComboBox_ApplyAutoSize( byval pCombo as CCOMBOBOX ptr )
+declare sub PsComboBox_ApplyAutoSize( byval pCombo as PSCOMBOBOX ptr )
 
 
-function GetComboBoxPointer( byval hCombo as HWND ) as CCOMBOBOX ptr
+function GetComboBoxPointer( byval hCombo as HWND ) as PSCOMBOBOX ptr
     dim pWindow as CWindow ptr = AfxCWindowPtr(hCombo)
     if pWindow = 0 then return 0
-    return cast( CCOMBOBOX ptr, pWindow->UserData(0) )
+    return cast( PSCOMBOBOX ptr, pWindow->UserData(0) )
 end function
 
 
@@ -25,8 +25,8 @@ end function
 ' Note that WM_LBUTTONUP is NOT on that list here, unlike in every capture-taking sibling:
 ' this control takes no capture, so an up-message carries no bookkeeping to strand.
 ' ========================================================================================
-private function CComboBox_CallMessage( _
-            byval pCombo as CCOMBOBOX ptr, _
+private function PsComboBox_CallMessage( _
+            byval pCombo as PSCOMBOBOX ptr, _
             byval hwnd   as HWND, _
             byval uMsg   as UINT, _
             byval wParam as WPARAM, _
@@ -36,7 +36,7 @@ private function CComboBox_CallMessage( _
     if pCombo = 0 then return false
     if pCombo->MessageCallback = 0 then return false
 
-    dim as CCOMBOBOX_MESSAGEINFO m
+    dim as PSCOMBOBOX_MESSAGEINFO m
     m.hCombo = hwnd
     m.uMsg   = uMsg
     m.wParam = wParam
@@ -48,20 +48,20 @@ end function
 ' ========================================================================================
 ' Re-derive the dropdown's colors from the button's, unless the host has claimed them.
 '
-' CPOPUPMENU_COLORS carries no defaults except SeparatorColor, so a list that is never given
+' PSPOPUPMENU_COLORS carries no defaults except SeparatorColor, so a list that is never given
 ' colors renders black on black. This is what stops that being the out-of-box experience, and
-' it is also why theming the button themes the list: a host sets CCOMBOBOX_COLORS once.
+' it is also why theming the button themes the list: a host sets PSCOMBOBOX_COLORS once.
 '
 ' The border is taken from BorderColorHot rather than BorderColor because the latter defaults
 ' EQUAL to BackColor (the button reads borderless) -- which would give the popup an invisible
 ' border and no edge at all against the host window behind it.
 ' ========================================================================================
-private sub CComboBox_ApplyDerivedListColors( byval pCombo as CCOMBOBOX ptr )
+private sub PsComboBox_ApplyDerivedListColors( byval pCombo as PSCOMBOBOX ptr )
     if pCombo = 0 then exit sub
     if pCombo->hList = 0 then exit sub
     if pCombo->bListColorsCustom then exit sub
 
-    dim as CPOPUPMENU_COLORS c
+    dim as PSPOPUPMENU_COLORS c
     c.BackColor         = pCombo->colors.BackColor
     c.ForeColor         = pCombo->colors.ForeColor
     c.BackColorHot      = pCombo->colors.BackColorHot
@@ -69,7 +69,7 @@ private sub CComboBox_ApplyDerivedListColors( byval pCombo as CCOMBOBOX ptr )
     c.ForeColorDisabled = pCombo->colors.ForeColorDisabled
     c.BorderColor       = pCombo->colors.BorderColorHot
     c.SeparatorColor    = pCombo->colors.ForeColorDisabled
-    CPopupMenu_SetColors( pCombo->hList, @c )
+    PsPopupMenu_SetColors( pCombo->hList, @c )
 end sub
 
 
@@ -81,26 +81,26 @@ end sub
 ' otherwise create a dozen WS_POPUP windows at startup for nothing. Nothing about the button
 ' needs the list to exist.
 '
-' hOwner is the host's TOP-LEVEL window, not our parent: CPopupMenu uses it for z-order and
+' hOwner is the host's TOP-LEVEL window, not our parent: PsPopupMenu uses it for z-order and
 ' for its foreground watch ("is the app still ours?"), and a child control is neither.
 ' ========================================================================================
-function CComboBox_EnsureList( byval hCombo as HWND ) as HWND
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_EnsureList( byval hCombo as HWND ) as HWND
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return 0
     if pCombo->hList then return pCombo->hList
 
     dim as HWND hOwner = GetAncestor( hCombo, GA_ROOT )
     if hOwner = 0 then hOwner = GetParent( hCombo )
 
-    dim as HWND hList = CPopupMenu_Create( hOwner, pCombo->idc_ComboBox )
+    dim as HWND hList = PsPopupMenu_Create( hOwner, pCombo->idc_ComboBox )
     if hList = 0 then return 0
 
     pCombo->hList = hList
     ' We are our own notify target: CPM_NOTIFY_COMMAND and CPM_NOTIFY_CLOSED are handled in
     ' our WndProc. One door -- no PM_SelectCallback plumbing on top of it.
-    CPopupMenu_SetNotifyWindow( hList, hCombo )
-    CPopupMenu_SetFonts( hList, pCombo->hTextFont, 0 )
-    CComboBox_ApplyDerivedListColors( pCombo )
+    PsPopupMenu_SetNotifyWindow( hList, hCombo )
+    PsPopupMenu_SetFonts( hList, pCombo->hTextFont, 0 )
+    PsComboBox_ApplyDerivedListColors( pCombo )
     return hList
 end function
 
@@ -108,8 +108,8 @@ end function
 ' ========================================================================================
 ' Make the dropdown at least as wide as the button.
 '
-' CPopupMenu_SetMinWidth floors the CONTENT width, but the window it reports adds padding and
-' a border on top -- and CPopupMenu exposes no getter for either, so the overhead cannot
+' PsPopupMenu_SetMinWidth floors the CONTENT width, but the window it reports adds padding and
+' a border on top -- and PsPopupMenu exposes no getter for either, so the overhead cannot
 ' simply be subtracted. It CAN be measured, which is what this does:
 '
 '   pass 1: floor = buttonW, measure -> w.
@@ -128,25 +128,25 @@ end function
 ' At most three measures, fully deterministic, and asserted in the self-test rather than
 ' eyeballed.
 ' ========================================================================================
-private sub CComboBox_SyncListWidth( byval hList as HWND, byval nButtonW as long )
+private sub PsComboBox_SyncListWidth( byval hList as HWND, byval nButtonW as long )
     if hList = 0 then exit sub
     if nButtonW <= 0 then exit sub
 
     dim as long w, h
-    CPopupMenu_SetMinWidth( hList, nButtonW )
-    if CPopupMenu_GetIdealSize( hList, w, h ) = false then exit sub
+    PsPopupMenu_SetMinWidth( hList, nButtonW )
+    if PsPopupMenu_GetIdealSize( hList, w, h ) = false then exit sub
     if w <= nButtonW then exit sub
 
     dim as long nMin2 = nButtonW - (w - nButtonW)
     if nMin2 < 0 then nMin2 = 0
 
     dim as long w2, h2
-    CPopupMenu_SetMinWidth( hList, nMin2 )
-    if CPopupMenu_GetIdealSize( hList, w2, h2 ) = false then
-        CPopupMenu_SetMinWidth( hList, nButtonW )     ' restore pass 1
+    PsPopupMenu_SetMinWidth( hList, nMin2 )
+    if PsPopupMenu_GetIdealSize( hList, w2, h2 ) = false then
+        PsPopupMenu_SetMinWidth( hList, nButtonW )     ' restore pass 1
         exit sub
     end if
-    if w2 < nButtonW then CPopupMenu_SetMinWidth( hList, nButtonW )
+    if w2 < nButtonW then PsPopupMenu_SetMinWidth( hList, nButtonW )
 end sub
 
 
@@ -155,24 +155,24 @@ end sub
 ' incapable of drifting: there is no incremental path to get wrong.
 '
 ' THE ROW ID IS (model index + 1), NOT the item's own id. Two reasons, and neither is
-' cosmetic. CPopupMenu reserves id 0 for separators, so a zero-based index cannot be used
+' cosmetic. PsPopupMenu reserves id 0 for separators, so a zero-based index cannot be used
 ' directly; and the host's `id` field is a free-form payload that would otherwise enter the
 ' command stream -- exactly the collision recorded in Learnings.md under "Replacing
-' TrackPopupMenu with CPopupMenu", where menu ids that had only ever been return values
+' TrackPopupMenu with PsPopupMenu", where menu ids that had only ever been return values
 ' started re-triggering the command that opened the menu.
 '
-' Exactly one row is checked. CPopupMenu has no CheckMenuRadioItem equivalent, so the mutual
+' Exactly one row is checked. PsPopupMenu has no CheckMenuRadioItem equivalent, so the mutual
 ' exclusion is ours -- and it falls out for free because we rebuild from a single nCurSel.
 ' ========================================================================================
-private sub CComboBox_RebuildListItems( byval pCombo as CCOMBOBOX ptr )
+private sub PsComboBox_RebuildListItems( byval pCombo as PSCOMBOBOX ptr )
     if pCombo = 0 then exit sub
     if pCombo->hList = 0 then exit sub
 
-    CPopupMenu_Clear( pCombo->hList )
+    PsPopupMenu_Clear( pCombo->hList )
     for i as long = 0 to pCombo->itemCount - 1
         dim as boolean bDisabled = (pCombo->items(i).isEnabled = false)
         dim as boolean bChecked  = (i = pCombo->nCurSel)
-        CPopupMenu_AddItem( pCombo->hList, i + 1, pCombo->items(i).wszText, "", bDisabled, bChecked )
+        PsPopupMenu_AddItem( pCombo->hList, i + 1, pCombo->items(i).wszText, "", bDisabled, bChecked )
     next
 end sub
 
@@ -193,8 +193,8 @@ end sub
 '
 ' Call it AFTER the new selection is stored, with the pre-change sample.
 ' ========================================================================================
-private sub CComboBox_AfterSelectionChange( _
-            byval pCombo      as CCOMBOBOX ptr, _
+private sub PsComboBox_AfterSelectionChange( _
+            byval pCombo      as PSCOMBOBOX ptr, _
             byval bTextBefore as boolean _
             )
 
@@ -202,7 +202,7 @@ private sub CComboBox_AfterSelectionChange( _
     if pCombo->IsTextVisible() = bTextBefore then exit sub
     pCombo->bLayoutDirty = true
     if pCombo->hWin then InvalidateRect( pCombo->hWin, NULL, TRUE )
-    CComboBox_ApplyAutoSize( pCombo )
+    PsComboBox_ApplyAutoSize( pCombo )
 end sub
 
 
@@ -217,14 +217,14 @@ end sub
 ' force a needless re-measure of every item on every pick.
 '
 ' The ONE exception is the -1 <-> selected boundary under CBO_TEXT_WHENSELECTED, and it is
-' handled by CComboBox_AfterSelectionChange rather than by a test here -- see its header for
+' handled by PsComboBox_AfterSelectionChange rather than by a test here -- see its header for
 ' why it samples the resolver instead of testing for -1.
 '
 ' The callback goes out LAST, after the state is consistent, so a host that queries
-' CComboBox_GetCurSel() from inside it sees the new value.
+' PsComboBox_GetCurSel() from inside it sees the new value.
 ' ========================================================================================
-private sub CComboBox_ApplyUserSel( _
-            byval pCombo as CCOMBOBOX ptr, _
+private sub PsComboBox_ApplyUserSel( _
+            byval pCombo as PSCOMBOBOX ptr, _
             byval hwnd   as HWND, _
             byval idxNew as long _
             )
@@ -243,7 +243,7 @@ private sub CComboBox_ApplyUserSel( _
     ' Before the callback: a host that re-places the control from its SelChange handler (which
     ' is what CBO_TEXT_WHENSELECTED asks of a host that has not turned on auto-size) must find
     ' GetIdealSize already reporting the NEW width.
-    CComboBox_AfterSelectionChange( pCombo, bTextBefore )
+    PsComboBox_AfterSelectionChange( pCombo, bTextBefore )
     if pCombo->SelChangeCallback then pCombo->SelChangeCallback( hwnd, idxOld, idxNew )
 end sub
 
@@ -251,7 +251,7 @@ end sub
 ' ========================================================================================
 ' Re-sync isOpen with what the dropdown window is actually doing.
 '
-' THIS EXISTS FOR ONE CASE and it is a genuine hole in CPopupMenu's contract rather than a
+' THIS EXISTS FOR ONE CASE and it is a genuine hole in PsPopupMenu's contract rather than a
 ' defensive habit: only ONE popup chain may be open at a time (gPM_OpenRoot is module-shared),
 ' and PM_ShowCore closes any other chain with bNotify = FALSE. So when combobox B is opened
 ' while combobox A's list is up, A's list is closed SILENTLY -- no CPM_NOTIFY_CLOSED ever
@@ -262,8 +262,8 @@ end sub
 ' deferred to the next non-paint touch (a mouse move, a focus change, the hover poll, or any
 ' query). That deferral is the residual cost of the hole and is documented rather than hidden.
 ' ========================================================================================
-private sub CComboBox_SyncOpenState( _
-            byval pCombo  as CCOMBOBOX ptr, _
+private sub PsComboBox_SyncOpenState( _
+            byval pCombo  as PSCOMBOBOX ptr, _
             byval hwnd    as HWND, _
             byval bNotify as boolean _
             )
@@ -271,7 +271,7 @@ private sub CComboBox_SyncOpenState( _
     if pCombo = 0 then exit sub
     if pCombo->isOpen = false then exit sub
     if pCombo->hList <> 0 then
-        if CPopupMenu_IsOpen( pCombo->hList ) then exit sub
+        if PsPopupMenu_IsOpen( pCombo->hList ) then exit sub
     end if
 
     pCombo->isOpen = false
@@ -285,22 +285,22 @@ end sub
 ' ========================================================================================
 ' Draw the button: chrome, caption, chevron, focus ring.
 '
-' Nothing in here touches a GDI object or a device context -- CBufferPaint owns rendering and
+' Nothing in here touches a GDI object or a device context -- PsBufferPaint owns rendering and
 ' this control owns geometry and state, which is the family contract.
 '
 ' THE CHEVRON IS GEOMETRY, NOT A GLYPH. Two strokes up and two strokes down, drawn as diagonal
 ' lines so GDI+ antialiases them. That buys independence from any icon font being installed,
 ' and it scales cleanly because the cell is a layout input rather than a character cell.
 '
-' One asymmetry worth knowing about the stroke weight: CBufferPaint.PaintLine DPI-scales the
+' One asymmetry worth knowing about the stroke weight: PsBufferPaint.PaintLine DPI-scales the
 ' pen width it is handed, so nChevronThick DOES grow on a high-DPI display -- unlike
 ' nBorderThick and nFocusThick, which are scaled nowhere. That is deliberate: a divider
 ' hairline should stay a hairline, but a glyph's stroke should grow with the glyph.
 ' ========================================================================================
-private sub CComboBox_RenderDefault( _
-            byval pCombo as CCOMBOBOX ptr, _
-            byval b      as CBufferPaint ptr, _
-            byval p      as CCOMBOBOX_PAINTINFO ptr _
+private sub PsComboBox_RenderDefault( _
+            byval pCombo as PSCOMBOBOX ptr, _
+            byval b      as PsBufferPaint ptr, _
+            byval p      as PSCOMBOBOX_PAINTINFO ptr _
             )
 
     if (pCombo = 0) orelse (b = 0) orelse (p = 0) then exit sub
@@ -338,7 +338,7 @@ private sub CComboBox_RenderDefault( _
     end with
 
     ' ---- the chrome --------------------------------------------------------------------
-    ' nCurvature is an ellipse DIAMETER (CBufferPaint keeps GDI's vocabulary and halves it
+    ' nCurvature is an ellipse DIAMETER (PsBufferPaint keeps GDI's vocabulary and halves it
     ' internally). Zero gives square corners through the same call.
     dim as RECT rcBtn = p->rcButton
     b->SetBackColor( clrBack )
@@ -358,7 +358,7 @@ private sub CComboBox_RenderDefault( _
             if p->isPlaceholder then clrText = pCombo->colors.ForeColorPlaceholder
 
             ' Paint with the SAME font the measuring pass used -- the caller's if set, else
-            ' the stock GUI font. CBufferPaint.SetFont IGNORES a null handle, so leaving it
+            ' the stock GUI font. PsBufferPaint.SetFont IGNORES a null handle, so leaving it
             ' unset here would silently paint in the DC's font while the widths were measured
             ' in another, and long captions would clip for no visible reason.
             dim as HFONT hFontUse = pCombo->hTextFont
@@ -420,18 +420,18 @@ end sub
 ' ========================================================================================
 ' Process WM_PAINT.
 ' ========================================================================================
-private function CComboBox_OnPaint( byval hwnd as HWND ) as LRESULT
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hwnd)
+private function PsComboBox_OnPaint( byval hwnd as HWND ) as LRESULT
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hwnd)
     if pCombo = null then return 0
 
     ' Correct a stale "open" flag before deciding colors, but WITHOUT running host callbacks
-    ' from inside a paint. See CComboBox_SyncOpenState.
-    CComboBox_SyncOpenState( pCombo, hwnd, false )
+    ' from inside a paint. See PsComboBox_SyncOpenState.
+    PsComboBox_SyncOpenState( pCombo, hwnd, false )
 
     ' Consume any pending layout before painting -- this is what makes layout lazy.
     if pCombo->bLayoutDirty then pCombo->LayoutCombo()
 
-    dim as CBufferPaint b
+    dim as PsBufferPaint b
     b.BeginDoubleBuffer(hwnd)
     ' The client is filled with the mood's own background, not a fixed one, so a paint
     ' callback that draws only a foreground still sits on the right colour.
@@ -446,7 +446,7 @@ private function CComboBox_OnPaint( byval hwnd as HWND ) as LRESULT
     b.SetBackColor( clrFill )
     b.PaintClientRect()
 
-    dim p as CCOMBOBOX_PAINTINFO
+    dim p as PSCOMBOBOX_PAINTINFO
     p.hCombo = hwnd
     p.b      = @b
     GetClientRect( hwnd, @p.rcClient )
@@ -467,7 +467,7 @@ private function CComboBox_OnPaint( byval hwnd as HWND ) as LRESULT
     if pCombo->PaintCallback then
         pCombo->PaintCallback( @p )
     else
-        CComboBox_RenderDefault( pCombo, @b, @p )
+        PsComboBox_RenderDefault( pCombo, @b, @p )
     end if
 
     b.EndDoubleBuffer()
@@ -479,7 +479,7 @@ end function
 ' Clear the hover state and stop the hover poll timer. Repaints only if the state actually
 ' changes, so this is cheap to call repeatedly.
 ' ========================================================================================
-private sub CComboBox_ClearHot( byval pCombo as CCOMBOBOX ptr, byval hwnd as HWND )
+private sub PsComboBox_ClearHot( byval pCombo as PSCOMBOBOX ptr, byval hwnd as HWND )
     if pCombo = 0 then exit sub
     if pCombo->hotTimerOn then
         KillTimer( hwnd, IDT_CCOMBOBOX_HOTTRACK )
@@ -494,14 +494,14 @@ end sub
 
 ' ========================================================================================
 ' Apply the ideal size to ourselves, preserving the top-left. Only runs when the host has
-' opted in with CComboBox_SetAutoSize -- the family default is that a control never moves
+' opted in with PsComboBox_SetAutoSize -- the family default is that a control never moves
 ' itself and the host measures with GetIdealSize.
 '
 ' Called from every mutator that can change the ideal width. It forces the pending layout
 ' first (that is where the measurement happens), then resizes -- which marks the layout dirty
 ' again through WM_SIZE, so the rects are re-derived against the new client area.
 ' ========================================================================================
-private sub CComboBox_ApplyAutoSize( byval pCombo as CCOMBOBOX ptr )
+private sub PsComboBox_ApplyAutoSize( byval pCombo as PSCOMBOBOX ptr )
     if pCombo = 0 then exit sub
     if pCombo->bAutoSize = false then exit sub
     if pCombo->hWin = 0 then exit sub
@@ -515,7 +515,7 @@ end sub
 
 
 ' ========================================================================================
-' CComboBox Window procedure
+' PsComboBox Window procedure
 '
 ' This control has no child windows, so there is nothing to subclass: every message is
 ' handled here and anything unhandled goes to DefWindowProc.
@@ -528,27 +528,27 @@ end sub
 ' "callback result ignored for WM_LBUTTONUP" caution. A note about capture copied in from a
 ' sibling would be a lie here.
 '
-' CS_DBLCLKS IS DELIBERATELY *NOT* SET, which is CToggle's and CIconPanel's call rather than
-' CSelectBar's. With it, the second of two rapid clicks arrives as WM_LBUTTONDBLCLK INSTEAD OF
+' CS_DBLCLKS IS DELIBERATELY *NOT* SET, which is PsToggle's and PsIconPanel's call rather than
+' PsSelectBar's. With it, the second of two rapid clicks arrives as WM_LBUTTONDBLCLK INSTEAD OF
 ' a second WM_LBUTTONDOWN -- and on this control a rapid second click is a legitimate
 ' close-then-reopen, which would be silently swallowed.
 '
-' FOCUS: this is the second focusable control in the family, after CToggle. See the
+' FOCUS: this is the second focusable control in the family, after PsToggle. See the
 ' WM_GETDLGCODE handler for the subtlety.
 ' ========================================================================================
-function CComboBox_WndProc( _
+function PsComboBox_WndProc( _
             byval hwnd   as HWND, _
             byval uMsg   as UINT, _
             byval wParam as WPARAM, _
             byval lParam as LPARAM _
             ) as LRESULT
 
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer( hwnd )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer( hwnd )
 
     select case uMsg
 
     case WM_PAINT
-        return CComboBox_OnPaint( hwnd )
+        return PsComboBox_OnPaint( hwnd )
 
     case WM_ERASEBKGND
         ' Never erase: WM_PAINT fills the whole client through the double buffer, so a
@@ -569,11 +569,11 @@ function CComboBox_WndProc( _
             dim as RECT rcClient
             GetClientRect( hwnd, @rcClient )
             if isMouseOverRECT( hwnd, rcClient ) = false then
-                CComboBox_ClearHot( pCombo, hwnd )
+                PsComboBox_ClearHot( pCombo, hwnd )
             end if
             ' Cheap place to notice a list that was closed behind our back (see
-            ' CComboBox_SyncOpenState), and one that can safely notify.
-            CComboBox_SyncOpenState( pCombo, hwnd, true )
+            ' PsComboBox_SyncOpenState), and one that can safely notify.
+            PsComboBox_SyncOpenState( pCombo, hwnd, true )
             return 0
         end if
 
@@ -581,7 +581,7 @@ function CComboBox_WndProc( _
         if pCombo = 0 then exit select
         if pCombo->isEnabled = false then exit select
 
-        CComboBox_SyncOpenState( pCombo, hwnd, true )
+        PsComboBox_SyncOpenState( pCombo, hwnd, true )
 
         dim as RECT rcClient
         GetClientRect( hwnd, @rcClient )
@@ -598,7 +598,7 @@ function CComboBox_WndProc( _
             ' Safety net: WM_MOUSELEAVE is not guaranteed to arrive when the mouse exits
             ' quickly (or onto another control), which would strand the control painted hot.
             if pCombo->hotTimerOn = false then
-                SetTimer( hwnd, IDT_CCOMBOBOX_HOTTRACK, CCOMBOBOX_HOTTRACK_MS, NULL )
+                SetTimer( hwnd, IDT_CCOMBOBOX_HOTTRACK, PSCOMBOBOX_HOTTRACK_MS, NULL )
                 pCombo->hotTimerOn = true
             end if
         end if
@@ -608,19 +608,19 @@ function CComboBox_WndProc( _
             InvalidateRect( hwnd, NULL, FALSE )
         end if
 
-        if CComboBox_CallMessage( pCombo, hwnd, uMsg, wParam, lParam ) then return 0
+        if PsComboBox_CallMessage( pCombo, hwnd, uMsg, wParam, lParam ) then return 0
 
     case WM_MOUSELEAVE
         if pCombo then
             ' Fast path for clearing the hot state (the WM_TIMER poll is the fallback for
             ' when this message never arrives).
-            CComboBox_ClearHot( pCombo, hwnd )
-            if CComboBox_CallMessage( pCombo, hwnd, uMsg, wParam, lParam ) then return 0
+            PsComboBox_ClearHot( pCombo, hwnd )
+            if PsComboBox_CallMessage( pCombo, hwnd, uMsg, wParam, lParam ) then return 0
         end if
 
     case WM_LBUTTONDOWN
         if pCombo = 0 then return 0
-        ' A disabled window does not receive mouse input at all (CComboBox_SetEnabled calls
+        ' A disabled window does not receive mouse input at all (PsComboBox_SetEnabled calls
         ' EnableWindow), so this is belt-and-braces against a host that disabled us by some
         ' other route.
         if pCombo->isEnabled = false then return 0
@@ -636,18 +636,18 @@ function CComboBox_WndProc( _
         dim as boolean bSuppress = pCombo->bSuppressNextOpen
         pCombo->bSuppressNextOpen = false
 
-        if CComboBox_CallMessage( pCombo, hwnd, uMsg, wParam, lParam ) then return 0
+        if PsComboBox_CallMessage( pCombo, hwnd, uMsg, wParam, lParam ) then return 0
         if bSuppress then return 0
 
         ' Toggle. The second branch only runs for a host that does NOT call
-        ' CComboBox_FilterMessage in its pump -- with the filter in place the list is already
+        ' PsComboBox_FilterMessage in its pump -- with the filter in place the list is already
         ' closed by the time we get here and bSuppress caught it. Handling it anyway means a
         ' host missing the pump contract still gets a button that opens and closes; it just
         ' loses keyboard navigation and outside-click dismissal.
         if pCombo->isOpen then
-            CComboBox_CloseUp( hwnd )
+            PsComboBox_CloseUp( hwnd )
         else
-            CComboBox_DropDown( hwnd )
+            PsComboBox_DropDown( hwnd )
         end if
         return 0
 
@@ -655,13 +655,13 @@ function CComboBox_WndProc( _
         ' Nothing to do: the list opened on the DOWN. Reported for completeness. The result
         ' IS honoured here, unlike in the capture-taking siblings -- see the WndProc header.
         if pCombo then
-            if CComboBox_CallMessage( pCombo, hwnd, uMsg, wParam, lParam ) then return 0
+            if PsComboBox_CallMessage( pCombo, hwnd, uMsg, wParam, lParam ) then return 0
         end if
 
     case WM_RBUTTONDOWN, WM_RBUTTONUP
-        ' Reported, never acted on: a context menu is the host's business (CPopupMenu).
+        ' Reported, never acted on: a context menu is the host's business (PsPopupMenu).
         if pCombo then
-            if CComboBox_CallMessage( pCombo, hwnd, uMsg, wParam, lParam ) then return 0
+            if PsComboBox_CallMessage( pCombo, hwnd, uMsg, wParam, lParam ) then return 0
         end if
 
     case WM_SETFOCUS, WM_KILLFOCUS
@@ -674,8 +674,8 @@ function CComboBox_WndProc( _
                 pCombo->isFocused = bFocused
                 InvalidateRect( hwnd, NULL, FALSE )
             end if
-            CComboBox_SyncOpenState( pCombo, hwnd, true )
-            CComboBox_CallMessage( pCombo, hwnd, uMsg, wParam, lParam )
+            PsComboBox_SyncOpenState( pCombo, hwnd, true )
+            PsComboBox_CallMessage( pCombo, hwnd, uMsg, wParam, lParam )
             return 0
         end if
 
@@ -687,7 +687,7 @@ function CComboBox_WndProc( _
         ' control would swallow the very navigation it opted into by being a tabstop. Claiming
         ' nothing would let a host's IsDialogMessage pump route Enter to the dialog's default
         ' button before the control ever saw it. Per-message is the only answer that gets both
-        ' right. (CToggle established this; the key list is longer here.)
+        ' right. (PsToggle established this; the key list is longer here.)
         if lParam then
             dim as MSG ptr pMsg = cast( MSG ptr, lParam )
             if pMsg->message = WM_KEYDOWN then
@@ -703,14 +703,14 @@ function CComboBox_WndProc( _
         if pCombo = 0 then exit select
         if pCombo->isEnabled = false then return 0
 
-        ' While the list is up, the keyboard belongs to CPopupMenu's pump filter, which
+        ' While the list is up, the keyboard belongs to PsPopupMenu's pump filter, which
         ' consumes every WM_KEYDOWN. Reaching here with the list open means the host is not
-        ' running CComboBox_FilterMessage; swallow the key rather than moving the selection
+        ' running PsComboBox_FilterMessage; swallow the key rather than moving the selection
         ' behind a list that is still showing the old checkmark.
-        CComboBox_SyncOpenState( pCombo, hwnd, true )
+        PsComboBox_SyncOpenState( pCombo, hwnd, true )
         if pCombo->isOpen then return 0
 
-        if CComboBox_CallMessage( pCombo, hwnd, uMsg, wParam, lParam ) then return 0
+        if PsComboBox_CallMessage( pCombo, hwnd, uMsg, wParam, lParam ) then return 0
 
         ' Win32 combobox rules. Up/Down/Home/End move the selection IN PLACE without opening
         ' -- each firing SelChange, because it is user action -- and Alt+Down / F4 / Space /
@@ -722,34 +722,34 @@ function CComboBox_WndProc( _
         select case wParam
         case VK_DOWN
             if bAlt then
-                CComboBox_DropDown( hwnd )
+                PsComboBox_DropDown( hwnd )
             else
                 dim as long idx = pCombo->NextSelectable( pCombo->nCurSel, 1 )
-                if idx <> -1 then CComboBox_ApplyUserSel( pCombo, hwnd, idx )
+                if idx <> -1 then PsComboBox_ApplyUserSel( pCombo, hwnd, idx )
             end if
             return 0
         case VK_UP
             if bAlt then
-                CComboBox_DropDown( hwnd )
+                PsComboBox_DropDown( hwnd )
             else
                 ' From "nothing selected", Up lands on the LAST selectable -- the only
                 ' sensible answer when there is no current position to step back from.
                 dim as long nFrom = pCombo->nCurSel
                 if nFrom = -1 then nFrom = pCombo->itemCount
                 dim as long idx = pCombo->NextSelectable( nFrom, -1 )
-                if idx <> -1 then CComboBox_ApplyUserSel( pCombo, hwnd, idx )
+                if idx <> -1 then PsComboBox_ApplyUserSel( pCombo, hwnd, idx )
             end if
             return 0
         case VK_HOME
             dim as long idx = pCombo->NextSelectable( -1, 1 )
-            if idx <> -1 then CComboBox_ApplyUserSel( pCombo, hwnd, idx )
+            if idx <> -1 then PsComboBox_ApplyUserSel( pCombo, hwnd, idx )
             return 0
         case VK_END
             dim as long idx = pCombo->NextSelectable( pCombo->itemCount, -1 )
-            if idx <> -1 then CComboBox_ApplyUserSel( pCombo, hwnd, idx )
+            if idx <> -1 then PsComboBox_ApplyUserSel( pCombo, hwnd, idx )
             return 0
         case VK_F4, VK_SPACE, VK_RETURN
-            CComboBox_DropDown( hwnd )
+            PsComboBox_DropDown( hwnd )
             return 0
         end select
 
@@ -767,14 +767,14 @@ function CComboBox_WndProc( _
             end if
             ' The selection change goes out AFTER the close notification, so a host handling
             ' both sees a consistent "closed, and here is the new value" order.
-            CComboBox_ApplyUserSel( pCombo, hwnd, idx )
+            PsComboBox_ApplyUserSel( pCombo, hwnd, idx )
             return 0
         end if
 
     case CPM_NOTIFY_CLOSED
         ' Dismissed by USER interaction without picking anything (Escape, outside click,
         ' foreground loss). Programmatic Hide/CloseChain send nothing, which is why
-        ' CComboBox_CloseUp clears the flag itself.
+        ' PsComboBox_CloseUp clears the flag itself.
         if pCombo then
             dim as boolean bWasOpen = pCombo->isOpen
             pCombo->isOpen = false
@@ -787,13 +787,13 @@ function CComboBox_WndProc( _
 
     case WM_ENABLE
         ' Keeps our own flag true to the window's real state, so a host that reaches for
-        ' EnableWindow directly instead of CComboBox_SetEnabled still gets the greyed
+        ' EnableWindow directly instead of PsComboBox_SetEnabled still gets the greyed
         ' rendering rather than a control that looks live but eats input.
         if pCombo then
             pCombo->isEnabled = (wParam <> 0)
             if pCombo->isEnabled = false then
                 pCombo->isHot = false
-                CComboBox_CloseUp( hwnd )
+                PsComboBox_CloseUp( hwnd )
             end if
             InvalidateRect( hwnd, NULL, FALSE )
         end if
@@ -833,9 +833,9 @@ end function
 
 
 ' ========================================================================================
-' CComboBox_Create
+' PsComboBox_Create
 ' ========================================================================================
-function CComboBox_Create( byval hWndParent as HWND, byval CtrlID as long ) as HWND
+function PsComboBox_Create( byval hWndParent as HWND, byval CtrlID as long ) as HWND
 
     dim pWindow as CWindow ptr = New CWindow
 
@@ -851,13 +851,13 @@ function CComboBox_Create( byval hWndParent as HWND, byval CtrlID as long ) as H
     ' that, because it also hosts three plain Win32 BUTTONs -- Tab moved between THOSE, so the
     ' interactive pass saw focus moving and concluded navigation worked.
     '
-    ' DO NOT COPY THIS INTO A WRAP-A-REAL-CHILD CONTROL. CListBox, CTextBox, CNumericUpDown
-    ' and CScrollPanel all NEED WS_EX_CONTROLPARENT, because their tabstop lives on an inner
+    ' DO NOT COPY THIS INTO A WRAP-A-REAL-CHILD CONTROL. PsListBox, PsTextBox, PsNumericUpDown
+    ' and PsScrollPanel all NEED WS_EX_CONTROLPARENT, because their tabstop lives on an inner
     ' child; passing 0 there would make them unreachable instead. The test is "does this
     ' window have children the dialog manager should find?", not "is this a control?".
     ' Full write-up in C:\dev\Learnings.md.
     dim as HWND hCtrl = _
-            pWindow->Create( hWndParent, "", @CComboBox_WndProc, _
+            pWindow->Create( hWndParent, "", @PsComboBox_WndProc, _
             0, 0, 0, 0, WS_CHILD or WS_TABSTOP or WS_CLIPSIBLINGS or WS_CLIPCHILDREN, _
             0 _
             )
@@ -865,7 +865,7 @@ function CComboBox_Create( byval hWndParent as HWND, byval CtrlID as long ) as H
     ' NOTE: CS_DBLCLKS is deliberately NOT enabled here -- see the WndProc header. It would
     ' turn a rapid close-then-reopen into a WM_LBUTTONDBLCLK the control would drop.
 
-    dim as CCOMBOBOX ptr pCombo = new CCOMBOBOX
+    dim as PSCOMBOBOX ptr pCombo = new PSCOMBOBOX
     pCombo->hWin         = hCtrl
     pCombo->idc_ComboBox = CtrlID
 
@@ -873,16 +873,16 @@ function CComboBox_Create( byval hWndParent as HWND, byval CtrlID as long ) as H
     ' pixels and the caller scales (the family rule). The three THICKNESS values are not
     ' scaled at all here -- and note nChevronThick is scaled later by PaintLine, which is the
     ' one deliberate exception (a glyph stroke grows, a hairline does not).
-    pCombo->nPadLeft       = pWindow->ScaleX( CCOMBOBOX_DEFAULT_PADLEFT )
-    pCombo->nPadRight      = pWindow->ScaleX( CCOMBOBOX_DEFAULT_PADRIGHT )
-    pCombo->nPadTop        = pWindow->ScaleY( CCOMBOBOX_DEFAULT_PADTOP )
-    pCombo->nPadBottom     = pWindow->ScaleY( CCOMBOBOX_DEFAULT_PADBOTTOM )
-    pCombo->nTextGap       = pWindow->ScaleX( CCOMBOBOX_DEFAULT_TEXTGAP )
-    pCombo->nChevronWidth  = pWindow->ScaleX( CCOMBOBOX_DEFAULT_CHEVRONW )
-    pCombo->nChevronHeight = pWindow->ScaleY( CCOMBOBOX_DEFAULT_CHEVRONH )
-    pCombo->nChevronGap    = pWindow->ScaleY( CCOMBOBOX_DEFAULT_CHEVRONGAP )
-    pCombo->nCurvature     = pWindow->ScaleY( CCOMBOBOX_DEFAULT_CURVATURE )
-    pCombo->nFocusGap      = pWindow->ScaleY( CCOMBOBOX_DEFAULT_FOCUSGAP )
+    pCombo->nPadLeft       = pWindow->ScaleX( PSCOMBOBOX_DEFAULT_PADLEFT )
+    pCombo->nPadRight      = pWindow->ScaleX( PSCOMBOBOX_DEFAULT_PADRIGHT )
+    pCombo->nPadTop        = pWindow->ScaleY( PSCOMBOBOX_DEFAULT_PADTOP )
+    pCombo->nPadBottom     = pWindow->ScaleY( PSCOMBOBOX_DEFAULT_PADBOTTOM )
+    pCombo->nTextGap       = pWindow->ScaleX( PSCOMBOBOX_DEFAULT_TEXTGAP )
+    pCombo->nChevronWidth  = pWindow->ScaleX( PSCOMBOBOX_DEFAULT_CHEVRONW )
+    pCombo->nChevronHeight = pWindow->ScaleY( PSCOMBOBOX_DEFAULT_CHEVRONH )
+    pCombo->nChevronGap    = pWindow->ScaleY( PSCOMBOBOX_DEFAULT_CHEVRONGAP )
+    pCombo->nCurvature     = pWindow->ScaleY( PSCOMBOBOX_DEFAULT_CURVATURE )
+    pCombo->nFocusGap      = pWindow->ScaleY( PSCOMBOBOX_DEFAULT_FOCUSGAP )
 
     SetWindowLongPtr( hCtrl, GWLP_ID, CtrlID )
 
@@ -897,59 +897,59 @@ end function
 ' ========================================================================================
 ' Items.  All SILENT -- no callbacks, no notifications.
 ' ========================================================================================
-function CComboBox_AddItem( byval hCombo as HWND, byval Text as DWSTRING, byval id as long = 0, byval itemData as integer = 0 ) as long
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_AddItem( byval hCombo as HWND, byval Text as DWSTRING, byval id as long = 0, byval itemData as integer = 0 ) as long
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return -1
-    dim as CCOMBOBOX_ITEM ptr pItem = pCombo->AddItemSlot()
+    dim as PSCOMBOBOX_ITEM ptr pItem = pCombo->AddItemSlot()
     if pItem = 0 then return -1
     pItem->wszText  = Text
     pItem->id       = id
     pItem->itemData = itemData
-    CComboBox_ApplyAutoSize( pCombo )
+    PsComboBox_ApplyAutoSize( pCombo )
     return pCombo->GetCount() - 1
 end function
 
-function CComboBox_InsertItem( byval hCombo as HWND, byval idx as long, byval Text as DWSTRING, byval id as long = 0, byval itemData as integer = 0 ) as long
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_InsertItem( byval hCombo as HWND, byval idx as long, byval Text as DWSTRING, byval id as long = 0, byval itemData as integer = 0 ) as long
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return -1
-    dim as CCOMBOBOX_ITEM ptr pItem = pCombo->InsertItemSlot( idx )
+    dim as PSCOMBOBOX_ITEM ptr pItem = pCombo->InsertItemSlot( idx )
     if pItem = 0 then return -1
     pItem->wszText  = Text
     pItem->id       = id
     pItem->itemData = itemData
-    CComboBox_ApplyAutoSize( pCombo )
+    PsComboBox_ApplyAutoSize( pCombo )
     return idx
 end function
 
-function CComboBox_DeleteItem( byval hCombo as HWND, byval idx as long ) as boolean
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_DeleteItem( byval hCombo as HWND, byval idx as long ) as boolean
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     dim as boolean bDone = pCombo->RemoveItemAt( idx )
-    if bDone then CComboBox_ApplyAutoSize( pCombo )
+    if bDone then PsComboBox_ApplyAutoSize( pCombo )
     return bDone
 end function
 
-sub CComboBox_Clear( byval hCombo as HWND )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_Clear( byval hCombo as HWND )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     pCombo->Clear()
-    CComboBox_ApplyAutoSize( pCombo )
+    PsComboBox_ApplyAutoSize( pCombo )
 end sub
 
-function CComboBox_GetCount( byval hCombo as HWND ) as long
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetCount( byval hCombo as HWND ) as long
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return 0
     return pCombo->GetCount()
 end function
 
-function CComboBox_IsValidItem( byval hCombo as HWND, byval idx as long ) as boolean
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_IsValidItem( byval hCombo as HWND, byval idx as long ) as boolean
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     return pCombo->IsValidItem( idx )
 end function
 
-function CComboBox_GetItemText( byval hCombo as HWND, byval idx as long ) as DWSTRING
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetItemText( byval hCombo as HWND, byval idx as long ) as DWSTRING
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return ""
     if pCombo->IsValidItem(idx) = false then return ""
     dim as DWSTRING wszOut = pCombo->items(idx).wszText
@@ -958,48 +958,48 @@ end function
 
 ' The caption drives the WIDEST-item measurement, so this re-measures and can change the
 ' button's ideal width -- and, with auto-size on, the button itself.
-function CComboBox_SetItemText( byval hCombo as HWND, byval idx as long, byval Text as DWSTRING ) as boolean
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_SetItemText( byval hCombo as HWND, byval idx as long, byval Text as DWSTRING ) as boolean
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     if pCombo->IsValidItem(idx) = false then return false
     pCombo->items(idx).wszText = Text
     pCombo->Refresh()
-    CComboBox_ApplyAutoSize( pCombo )
+    PsComboBox_ApplyAutoSize( pCombo )
     return true
 end function
 
-function CComboBox_GetItemID( byval hCombo as HWND, byval idx as long ) as long
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetItemID( byval hCombo as HWND, byval idx as long ) as long
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return 0
     if pCombo->IsValidItem(idx) = false then return 0
     return pCombo->items(idx).id
 end function
 
-function CComboBox_SetItemID( byval hCombo as HWND, byval idx as long, byval id as long ) as boolean
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_SetItemID( byval hCombo as HWND, byval idx as long, byval id as long ) as boolean
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     if pCombo->IsValidItem(idx) = false then return false
     pCombo->items(idx).id = id
     return true
 end function
 
-function CComboBox_GetItemData( byval hCombo as HWND, byval idx as long ) as integer
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetItemData( byval hCombo as HWND, byval idx as long ) as integer
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return 0
     if pCombo->IsValidItem(idx) = false then return 0
     return pCombo->items(idx).itemData
 end function
 
-function CComboBox_SetItemData( byval hCombo as HWND, byval idx as long, byval itemData as integer ) as boolean
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_SetItemData( byval hCombo as HWND, byval idx as long, byval itemData as integer ) as boolean
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     if pCombo->IsValidItem(idx) = false then return false
     pCombo->items(idx).itemData = itemData
     return true
 end function
 
-function CComboBox_GetItemEnabled( byval hCombo as HWND, byval idx as long ) as boolean
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetItemEnabled( byval hCombo as HWND, byval idx as long ) as boolean
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     if pCombo->IsValidItem(idx) = false then return false
     return pCombo->items(idx).isEnabled
@@ -1007,9 +1007,9 @@ end function
 
 ' Disabling the CURRENT item clears the selection. A disabled item is unreachable by any user
 ' action, so leaving it selected would leave the button showing a value the user cannot
-' restore once they move off it -- and CComboBox_SetCurSel already refuses to put it back.
-function CComboBox_SetItemEnabled( byval hCombo as HWND, byval idx as long, byval bEnabled as boolean ) as boolean
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+' restore once they move off it -- and PsComboBox_SetCurSel already refuses to put it back.
+function PsComboBox_SetItemEnabled( byval hCombo as HWND, byval idx as long, byval bEnabled as boolean ) as boolean
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     if pCombo->IsValidItem(idx) = false then return false
     dim as boolean bTextBefore = pCombo->IsTextVisible()
@@ -1020,12 +1020,12 @@ function CComboBox_SetItemEnabled( byval hCombo as HWND, byval idx as long, byva
     if pCombo->hWin then InvalidateRect( pCombo->hWin, NULL, FALSE )
     ' Clearing the selection here can collapse a CBO_TEXT_WHENSELECTED button back to
     ' arrow-only, which is a width change like any other.
-    CComboBox_AfterSelectionChange( pCombo, bTextBefore )
+    PsComboBox_AfterSelectionChange( pCombo, bTextBefore )
     return true
 end function
 
-function CComboBox_FindItemByID( byval hCombo as HWND, byval id as long ) as long
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_FindItemByID( byval hCombo as HWND, byval id as long ) as long
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return -1
     for i as long = 0 to pCombo->itemCount - 1
         if pCombo->items(i).id = id then return i
@@ -1033,8 +1033,8 @@ function CComboBox_FindItemByID( byval hCombo as HWND, byval id as long ) as lon
     return -1
 end function
 
-function CComboBox_FindItemByText( byval hCombo as HWND, byval Text as DWSTRING ) as long
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_FindItemByText( byval hCombo as HWND, byval Text as DWSTRING ) as long
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return -1
     dim as wstring * 1024 wszWant
     wszWant = Text
@@ -1050,8 +1050,8 @@ end function
 ' ========================================================================================
 ' Selection
 ' ========================================================================================
-function CComboBox_GetCurSel( byval hCombo as HWND ) as long
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetCurSel( byval hCombo as HWND ) as long
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return -1
     return pCombo->nCurSel
 end function
@@ -1064,8 +1064,8 @@ end function
 '
 ' No layout is marked dirty -- the width comes from the widest item, not the selected one.
 ' ========================================================================================
-function CComboBox_SetCurSel( byval hCombo as HWND, byval idx as long ) as boolean
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_SetCurSel( byval hCombo as HWND, byval idx as long ) as boolean
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     if idx <> -1 then
         if pCombo->IsValidItem(idx) = false then return false
@@ -1075,13 +1075,13 @@ function CComboBox_SetCurSel( byval hCombo as HWND, byval idx as long ) as boole
     dim as boolean bTextBefore = pCombo->IsTextVisible()
     pCombo->nCurSel = idx
     if pCombo->hWin then InvalidateRect( pCombo->hWin, NULL, FALSE )
-    CComboBox_AfterSelectionChange( pCombo, bTextBefore )
+    PsComboBox_AfterSelectionChange( pCombo, bTextBefore )
     return true
 end function
 
 ' What the BUTTON is currently showing: the selected caption, the placeholder, or "".
-function CComboBox_GetText( byval hCombo as HWND ) as DWSTRING
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetText( byval hCombo as HWND ) as DWSTRING
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return ""
     dim as boolean bPlaceholder = false
     dim as DWSTRING wszOut = pCombo->DisplayText( bPlaceholder )
@@ -1092,8 +1092,8 @@ end function
 ' ========================================================================================
 ' State
 ' ========================================================================================
-function CComboBox_GetEnabled( byval hCombo as HWND ) as boolean
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetEnabled( byval hCombo as HWND ) as boolean
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     return pCombo->isEnabled
 end function
@@ -1106,8 +1106,8 @@ end function
 ' host that calls EnableWindow itself); the work is repeated here because Windows sends no
 ' WM_ENABLE when the state was already what we asked for.
 ' ========================================================================================
-sub CComboBox_SetEnabled( byval hCombo as HWND, byval isEnabled as boolean )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetEnabled( byval hCombo as HWND, byval isEnabled as boolean )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     pCombo->isEnabled = isEnabled
     if isEnabled then
@@ -1115,21 +1115,21 @@ sub CComboBox_SetEnabled( byval hCombo as HWND, byval isEnabled as boolean )
     else
         EnableWindow( hCombo, FALSE )
         pCombo->isHot = false
-        CComboBox_CloseUp( hCombo )
+        PsComboBox_CloseUp( hCombo )
     end if
     InvalidateRect( hCombo, NULL, FALSE )
 end sub
 
-function CComboBox_GetFocused( byval hCombo as HWND ) as boolean
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetFocused( byval hCombo as HWND ) as boolean
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     return pCombo->isFocused
 end function
 
-function CComboBox_IsDroppedDown( byval hCombo as HWND ) as boolean
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_IsDroppedDown( byval hCombo as HWND ) as boolean
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
-    CComboBox_SyncOpenState( pCombo, hCombo, true )
+    PsComboBox_SyncOpenState( pCombo, hCombo, true )
     return pCombo->isOpen
 end function
 
@@ -1141,34 +1141,34 @@ end function
 '      just-in-time hook, so a host can Clear + AddItem and have it picked up below;
 '   2. rows are rebuilt from items(), so the list can never drift from the model;
 '   3. the font is re-handed over, in case SetFont ran after the list was created;
-'   4. the width is synced against the button (see CComboBox_SyncListWidth);
+'   4. the width is synced against the button (see PsComboBox_SyncListWidth);
 '   5. the current row is preselected, so keyboard navigation starts where the user is
 '      rather than at the top;
-'   6. the anchor is the BUTTON CHROME in screen coords -- CPopupMenu_ShowForRect aligns left
+'   6. the anchor is the BUTTON CHROME in screen coords -- PsPopupMenu_ShowForRect aligns left
 '      edges, sits at bottom-1 so the borders merge, and handles the work-area clamp/flip.
 '
 ' If it bails after step 1 a matching DropDown(FALSE) is fired, so the callback's open/close
 ' pairing always holds even when the open fails.
 ' ========================================================================================
-function CComboBox_DropDown( byval hCombo as HWND ) as boolean
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_DropDown( byval hCombo as HWND ) as boolean
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     if pCombo->isEnabled = false then return false
 
-    CComboBox_SyncOpenState( pCombo, hCombo, true )
+    PsComboBox_SyncOpenState( pCombo, hCombo, true )
     if pCombo->isOpen then return true
 
     if pCombo->DropDownCallback then pCombo->DropDownCallback( hCombo, true )
 
-    dim as HWND hList = CComboBox_EnsureList( hCombo )
+    dim as HWND hList = PsComboBox_EnsureList( hCombo )
     dim as boolean bCanShow = (hList <> 0) andalso (pCombo->itemCount > 0)
     if bCanShow = false then
         if pCombo->DropDownCallback then pCombo->DropDownCallback( hCombo, false )
         return false
     end if
 
-    CComboBox_RebuildListItems( pCombo )
-    CPopupMenu_SetFonts( hList, pCombo->hTextFont, 0 )
+    PsComboBox_RebuildListItems( pCombo )
+    PsPopupMenu_SetFonts( hList, pCombo->hTextFont, 0 )
 
     if pCombo->bLayoutDirty then pCombo->LayoutCombo()
     dim as RECT rcAnchor = pCombo->rcButton
@@ -1180,15 +1180,15 @@ function CComboBox_DropDown( byval hCombo as HWND ) as boolean
     ClientToScreen( hCombo, @ptBR )
     SetRect( @rcAnchor, ptTL.x, ptTL.y, ptBR.x, ptBR.y )
 
-    CComboBox_SyncListWidth( hList, rcAnchor.right - rcAnchor.left )
+    PsComboBox_SyncListWidth( hList, rcAnchor.right - rcAnchor.left )
 
     if pCombo->IsValidItem( pCombo->nCurSel ) then
-        CPopupMenu_SetCurSel( hList, pCombo->nCurSel )
+        PsPopupMenu_SetCurSel( hList, pCombo->nCurSel )
     else
-        CPopupMenu_SetCurSel( hList, -1 )
+        PsPopupMenu_SetCurSel( hList, -1 )
     end if
 
-    if CPopupMenu_ShowForRect( hList, rcAnchor, PM_ALIGN_BELOW ) = false then
+    if PsPopupMenu_ShowForRect( hList, rcAnchor, PM_ALIGN_BELOW ) = false then
         if pCombo->DropDownCallback then pCombo->DropDownCallback( hCombo, false )
         return false
     end if
@@ -1199,21 +1199,21 @@ function CComboBox_DropDown( byval hCombo as HWND ) as boolean
 end function
 
 ' ========================================================================================
-' Close the dropdown. CPopupMenu_Hide is SILENT (programmatic close sends no CPM_NOTIFY_*),
+' Close the dropdown. PsPopupMenu_Hide is SILENT (programmatic close sends no CPM_NOTIFY_*),
 ' so the flag and the callback are our own responsibility here.
 ' ========================================================================================
-sub CComboBox_CloseUp( byval hCombo as HWND )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_CloseUp( byval hCombo as HWND )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
-    if pCombo->hList then CPopupMenu_Hide( pCombo->hList )
+    if pCombo->hList then PsPopupMenu_Hide( pCombo->hList )
     if pCombo->isOpen = false then exit sub
     pCombo->isOpen = false
     InvalidateRect( hCombo, NULL, FALSE )
     if pCombo->DropDownCallback then pCombo->DropDownCallback( hCombo, false )
 end sub
 
-sub CComboBox_Refresh( byval hCombo as HWND )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_Refresh( byval hCombo as HWND )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     pCombo->Refresh()
 end sub
@@ -1222,8 +1222,8 @@ end sub
 ' ========================================================================================
 ' Layout.  All setters take RAW PIXELS -- the caller DPI-scales.
 ' ========================================================================================
-function CComboBox_GetShowText( byval hCombo as HWND ) as boolean
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetShowText( byval hCombo as HWND ) as boolean
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     return pCombo->IsTextVisible()
 end function
@@ -1233,22 +1233,22 @@ end function
 ' why the enum exists. Note the asymmetry with the getter, which answers "is a caption drawn
 ' right now" rather than echoing the mode back: for WHENSELECTED those are different questions
 ' and the state one is what a caller has any use for.
-sub CComboBox_SetShowText( byval hCombo as HWND, byval bShowText as boolean )
+sub PsComboBox_SetShowText( byval hCombo as HWND, byval bShowText as boolean )
     if bShowText then
-        CComboBox_SetTextMode( hCombo, CBO_TEXT_ALWAYS )
+        PsComboBox_SetTextMode( hCombo, CBO_TEXT_ALWAYS )
     else
-        CComboBox_SetTextMode( hCombo, CBO_TEXT_NEVER )
+        PsComboBox_SetTextMode( hCombo, CBO_TEXT_NEVER )
     end if
 end sub
 
-function CComboBox_GetTextMode( byval hCombo as HWND ) as long
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetTextMode( byval hCombo as HWND ) as long
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return CBO_TEXT_ALWAYS
     return pCombo->nTextMode
 end function
 
-sub CComboBox_SetTextMode( byval hCombo as HWND, byval nTextMode as long )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetTextMode( byval hCombo as HWND, byval nTextMode as long )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     select case nTextMode
     case CBO_TEXT_ALWAYS, CBO_TEXT_NEVER, CBO_TEXT_WHENSELECTED
@@ -1258,27 +1258,27 @@ sub CComboBox_SetTextMode( byval hCombo as HWND, byval nTextMode as long )
     if pCombo->nTextMode = nTextMode then exit sub
     pCombo->nTextMode = nTextMode
     pCombo->Refresh()
-    CComboBox_ApplyAutoSize( pCombo )
+    PsComboBox_ApplyAutoSize( pCombo )
 end sub
 
-function CComboBox_GetAutoSize( byval hCombo as HWND ) as boolean
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetAutoSize( byval hCombo as HWND ) as boolean
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     return pCombo->bAutoSize
 end function
 
 ' Turning it ON applies immediately, so a host does not have to also call SetWindowPos once
 ' to get the initial fit.
-sub CComboBox_SetAutoSize( byval hCombo as HWND, byval bAutoSize as boolean )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetAutoSize( byval hCombo as HWND, byval bAutoSize as boolean )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     pCombo->bAutoSize = bAutoSize
-    CComboBox_ApplyAutoSize( pCombo )
+    PsComboBox_ApplyAutoSize( pCombo )
 end sub
 
-sub CComboBox_GetPadding( byval hCombo as HWND, byref nLeft as long, byref nTop as long, byref nRight as long, byref nBottom as long )
+sub PsComboBox_GetPadding( byval hCombo as HWND, byref nLeft as long, byref nTop as long, byref nRight as long, byref nBottom as long )
     nLeft = 0 : nTop = 0 : nRight = 0 : nBottom = 0
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     nLeft   = pCombo->nPadLeft
     nTop    = pCombo->nPadTop
@@ -1286,8 +1286,8 @@ sub CComboBox_GetPadding( byval hCombo as HWND, byref nLeft as long, byref nTop 
     nBottom = pCombo->nPadBottom
 end sub
 
-sub CComboBox_SetPadding( byval hCombo as HWND, byval nLeft as long, byval nTop as long, byval nRight as long, byval nBottom as long )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetPadding( byval hCombo as HWND, byval nLeft as long, byval nTop as long, byval nRight as long, byval nBottom as long )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     if nLeft   < 0 then nLeft   = 0
     if nTop    < 0 then nTop    = 0
@@ -1298,27 +1298,27 @@ sub CComboBox_SetPadding( byval hCombo as HWND, byval nLeft as long, byval nTop 
     pCombo->nPadRight  = nRight
     pCombo->nPadBottom = nBottom
     pCombo->Refresh()
-    CComboBox_ApplyAutoSize( pCombo )
+    PsComboBox_ApplyAutoSize( pCombo )
 end sub
 
-function CComboBox_GetTextGap( byval hCombo as HWND ) as long
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetTextGap( byval hCombo as HWND ) as long
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return 0
     return pCombo->nTextGap
 end function
 
-sub CComboBox_SetTextGap( byval hCombo as HWND, byval nTextGap as long )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetTextGap( byval hCombo as HWND, byval nTextGap as long )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     if nTextGap < 0 then nTextGap = 0
     pCombo->nTextGap = nTextGap
     pCombo->Refresh()
-    CComboBox_ApplyAutoSize( pCombo )
+    PsComboBox_ApplyAutoSize( pCombo )
 end sub
 
-sub CComboBox_GetChevronSize( byval hCombo as HWND, byref nWidth as long, byref nHeight as long )
+sub PsComboBox_GetChevronSize( byval hCombo as HWND, byref nWidth as long, byref nHeight as long )
     nWidth = 0 : nHeight = 0
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     nWidth  = pCombo->nChevronWidth
     nHeight = pCombo->nChevronHeight
@@ -1327,84 +1327,84 @@ end sub
 ' Clamped at 2x2: below that the arms degenerate and PaintLine would take its horizontal or
 ' vertical branch and draw a stray bar instead of a chevron. The painter guards this too, but
 ' refusing the value here means GetChevronRect never reports a cell nothing can be drawn in.
-sub CComboBox_SetChevronSize( byval hCombo as HWND, byval nWidth as long, byval nHeight as long )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetChevronSize( byval hCombo as HWND, byval nWidth as long, byval nHeight as long )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     if nWidth  < 2 then nWidth  = 2
     if nHeight < 2 then nHeight = 2
     pCombo->nChevronWidth  = nWidth
     pCombo->nChevronHeight = nHeight
     pCombo->Refresh()
-    CComboBox_ApplyAutoSize( pCombo )
+    PsComboBox_ApplyAutoSize( pCombo )
 end sub
 
-function CComboBox_GetChevronGap( byval hCombo as HWND ) as long
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetChevronGap( byval hCombo as HWND ) as long
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return 0
     return pCombo->nChevronGap
 end function
 
 ' The gap lives INSIDE the chevron cell, so it changes the two arms' height and never the
 ' control's ideal size -- no auto-size pass is needed.
-sub CComboBox_SetChevronGap( byval hCombo as HWND, byval nGap as long )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetChevronGap( byval hCombo as HWND, byval nGap as long )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     if nGap < 0 then nGap = 0
     pCombo->nChevronGap = nGap
     if pCombo->hWin then InvalidateRect( pCombo->hWin, NULL, FALSE )
 end sub
 
-function CComboBox_GetChevronThickness( byval hCombo as HWND ) as long
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetChevronThickness( byval hCombo as HWND ) as long
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return 0
     return pCombo->nChevronThick
 end function
 
 ' Stroke weight only, no layout consequence: the arms are drawn inside the cell, so changing
-' this repaints but never moves anything. Note CBufferPaint.PaintLine DPI-scales what it is
+' this repaints but never moves anything. Note PsBufferPaint.PaintLine DPI-scales what it is
 ' given, unlike the border and ring thicknesses -- see the painter's header.
-sub CComboBox_SetChevronThickness( byval hCombo as HWND, byval nThickness as long )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetChevronThickness( byval hCombo as HWND, byval nThickness as long )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     if nThickness < 1 then nThickness = 1
     pCombo->nChevronThick = nThickness
     if pCombo->hWin then InvalidateRect( pCombo->hWin, NULL, FALSE )
 end sub
 
-function CComboBox_GetCornerCurvature( byval hCombo as HWND ) as long
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetCornerCurvature( byval hCombo as HWND ) as long
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return 0
     return pCombo->nCurvature
 end function
 
-' An ellipse DIAMETER, not a radius -- CBufferPaint keeps GDI's vocabulary. 0 = square.
-sub CComboBox_SetCornerCurvature( byval hCombo as HWND, byval nCurvature as long )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+' An ellipse DIAMETER, not a radius -- PsBufferPaint keeps GDI's vocabulary. 0 = square.
+sub PsComboBox_SetCornerCurvature( byval hCombo as HWND, byval nCurvature as long )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     if nCurvature < 0 then nCurvature = 0
     pCombo->nCurvature = nCurvature
     if pCombo->hWin then InvalidateRect( pCombo->hWin, NULL, FALSE )
 end sub
 
-function CComboBox_GetBorderThickness( byval hCombo as HWND ) as long
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetBorderThickness( byval hCombo as HWND ) as long
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return 0
     return pCombo->nBorderThick
 end function
 
 ' Thickness only, no layout consequence: the border is drawn INSIDE the chrome. Zero means no
 ' border at all (and the chrome is then filled with a plain rounded rect).
-sub CComboBox_SetBorderThickness( byval hCombo as HWND, byval nThickness as long )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetBorderThickness( byval hCombo as HWND, byval nThickness as long )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     if nThickness < 0 then nThickness = 0
     pCombo->nBorderThick = nThickness
     if pCombo->hWin then InvalidateRect( pCombo->hWin, NULL, FALSE )
 end sub
 
-sub CComboBox_GetFocusRing( byval hCombo as HWND, byref nGap as long, byref nThickness as long )
+sub PsComboBox_GetFocusRing( byval hCombo as HWND, byref nGap as long, byref nThickness as long )
     nGap = 0 : nThickness = 0
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     nGap       = pCombo->nFocusGap
     nThickness = pCombo->nFocusThick
@@ -1412,29 +1412,29 @@ end sub
 
 ' BOTH are layout inputs, focused or not: the ring's band is reserved unconditionally so the
 ' button does not jump when focus arrives, which means either value changes the ideal size.
-sub CComboBox_SetFocusRing( byval hCombo as HWND, byval nGap as long, byval nThickness as long )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetFocusRing( byval hCombo as HWND, byval nGap as long, byval nThickness as long )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     if nGap < 0 then nGap = 0
     if nThickness < 0 then nThickness = 0
     pCombo->nFocusGap   = nGap
     pCombo->nFocusThick = nThickness
     pCombo->Refresh()
-    CComboBox_ApplyAutoSize( pCombo )
+    PsComboBox_ApplyAutoSize( pCombo )
 end sub
 
 ' ========================================================================================
 ' The measured button size: chrome plus the focus-ring band on every side.
 '
 ' It forces a pending layout, because the width depends on MEASURED text and there is no way
-' to compute it from the scalars alone (which is how CToggle's equivalent dodges the problem).
+' to compute it from the scalars alone (which is how PsToggle's equivalent dodges the problem).
 ' What makes it valid before the control has ever been sized is that LayoutCombo runs its
 ' measuring pass BEFORE bailing on a zero client area -- see the layout header.
 ' ========================================================================================
-sub CComboBox_GetIdealSize( byval hCombo as HWND, byref nWidth as long, byref nHeight as long )
+sub PsComboBox_GetIdealSize( byval hCombo as HWND, byref nWidth as long, byref nHeight as long )
     nWidth  = 0
     nHeight = 0
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     if pCombo->bLayoutDirty then pCombo->LayoutCombo()
     nWidth  = pCombo->nIdealW
@@ -1448,9 +1448,9 @@ end sub
 ' GetTextRect returns TRUE with an EMPTY rect in arrow-only mode -- empty is the honest
 ' answer there, and reporting failure would conflate "no caption" with "not sized yet".
 ' ========================================================================================
-function CComboBox_GetButtonRect( byval hCombo as HWND, byref rc as RECT ) as boolean
+function PsComboBox_GetButtonRect( byval hCombo as HWND, byref rc as RECT ) as boolean
     SetRectEmpty( @rc )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     if pCombo->bLayoutDirty then pCombo->LayoutCombo()
     if pCombo->bLayoutDirty then return false        ' still no client area
@@ -1458,9 +1458,9 @@ function CComboBox_GetButtonRect( byval hCombo as HWND, byref rc as RECT ) as bo
     return true
 end function
 
-function CComboBox_GetTextRect( byval hCombo as HWND, byref rc as RECT ) as boolean
+function PsComboBox_GetTextRect( byval hCombo as HWND, byref rc as RECT ) as boolean
     SetRectEmpty( @rc )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     if pCombo->bLayoutDirty then pCombo->LayoutCombo()
     if pCombo->bLayoutDirty then return false
@@ -1468,9 +1468,9 @@ function CComboBox_GetTextRect( byval hCombo as HWND, byref rc as RECT ) as bool
     return true
 end function
 
-function CComboBox_GetChevronRect( byval hCombo as HWND, byref rc as RECT ) as boolean
+function PsComboBox_GetChevronRect( byval hCombo as HWND, byref rc as RECT ) as boolean
     SetRectEmpty( @rc )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     if pCombo->bLayoutDirty then pCombo->LayoutCombo()
     if pCombo->bLayoutDirty then return false
@@ -1478,9 +1478,9 @@ function CComboBox_GetChevronRect( byval hCombo as HWND, byref rc as RECT ) as b
     return true
 end function
 
-function CComboBox_GetVisualRect( byval hCombo as HWND, byref rc as RECT ) as boolean
+function PsComboBox_GetVisualRect( byval hCombo as HWND, byref rc as RECT ) as boolean
     SetRectEmpty( @rc )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     if pCombo->bLayoutDirty then pCombo->LayoutCombo()
     if pCombo->bLayoutDirty then return false
@@ -1492,43 +1492,43 @@ end function
 ' ========================================================================================
 ' Appearance
 ' ========================================================================================
-sub CComboBox_GetColors( byval hCombo as HWND, byval pColors as CCOMBOBOX_COLORS ptr )
+sub PsComboBox_GetColors( byval hCombo as HWND, byval pColors as PSCOMBOBOX_COLORS ptr )
     if pColors = 0 then exit sub
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     *pColors = pCombo->colors
 end sub
 
 ' Also re-derives the DROPDOWN's colors, unless the host has claimed them with
-' CComboBox_SetListColors -- so theming the button themes the list for free.
-sub CComboBox_SetColors( byval hCombo as HWND, byval pColors as CCOMBOBOX_COLORS ptr )
+' PsComboBox_SetListColors -- so theming the button themes the list for free.
+sub PsComboBox_SetColors( byval hCombo as HWND, byval pColors as PSCOMBOBOX_COLORS ptr )
     if pColors = 0 then exit sub
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     pCombo->colors = *pColors
-    CComboBox_ApplyDerivedListColors( pCombo )
+    PsComboBox_ApplyDerivedListColors( pCombo )
     if pCombo->hWin then InvalidateRect( pCombo->hWin, NULL, TRUE )
 end sub
 
-function CComboBox_GetFont( byval hCombo as HWND ) as HFONT
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetFont( byval hCombo as HWND ) as HFONT
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return 0
     return pCombo->hTextFont
 end function
 
 ' BORROWED, never owned: keep it alive and destroy it yourself. It is also the MEASURING font
 ' and is handed straight to the dropdown, so button and list can never disagree about widths.
-sub CComboBox_SetFont( byval hCombo as HWND, byval hTextFont as HFONT )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetFont( byval hCombo as HWND, byval hTextFont as HFONT )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     pCombo->hTextFont = hTextFont
-    if pCombo->hList then CPopupMenu_SetFonts( pCombo->hList, hTextFont, 0 )
+    if pCombo->hList then PsPopupMenu_SetFonts( pCombo->hList, hTextFont, 0 )
     pCombo->Refresh()
-    CComboBox_ApplyAutoSize( pCombo )
+    PsComboBox_ApplyAutoSize( pCombo )
 end sub
 
-function CComboBox_GetPlaceholderText( byval hCombo as HWND ) as DWSTRING
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetPlaceholderText( byval hCombo as HWND ) as DWSTRING
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return ""
     dim as DWSTRING wszOut = pCombo->wszPlaceholder
     return wszOut
@@ -1536,76 +1536,76 @@ end function
 
 ' The placeholder is NOT measured and never affects the width (see LayoutCombo), so this only
 ' ever needs a repaint -- and only when nothing is selected.
-sub CComboBox_SetPlaceholderText( byval hCombo as HWND, byval Text as DWSTRING )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetPlaceholderText( byval hCombo as HWND, byval Text as DWSTRING )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     pCombo->wszPlaceholder = Text
     if pCombo->hWin then InvalidateRect( pCombo->hWin, NULL, FALSE )
 end sub
 
 ' 0 until the list has been created, which happens on the first DropDown. Call
-' CComboBox_EnsureList first if you want to theme it up front. APPEARANCE ONLY -- see the
+' PsComboBox_EnsureList first if you want to theme it up front. APPEARANCE ONLY -- see the
 ' header for why mutating rows through it is not supported.
-function CComboBox_GetListHandle( byval hCombo as HWND ) as HWND
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+function PsComboBox_GetListHandle( byval hCombo as HWND ) as HWND
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return 0
     return pCombo->hList
 end function
 
-' Claims the dropdown's colors permanently: from here on CComboBox_SetColors will not
+' Claims the dropdown's colors permanently: from here on PsComboBox_SetColors will not
 ' re-derive them, so an explicit choice is never overwritten by a later theme change.
-sub CComboBox_SetListColors( byval hCombo as HWND, byval pColors as CPOPUPMENU_COLORS ptr )
+sub PsComboBox_SetListColors( byval hCombo as HWND, byval pColors as PSPOPUPMENU_COLORS ptr )
     if pColors = 0 then exit sub
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
-    if CComboBox_EnsureList( hCombo ) = 0 then exit sub
+    if PsComboBox_EnsureList( hCombo ) = 0 then exit sub
     pCombo->bListColorsCustom = true
-    CPopupMenu_SetColors( pCombo->hList, pColors )
+    PsPopupMenu_SetColors( pCombo->hList, pColors )
 end sub
 
-sub CComboBox_SetListItemHeight( byval hCombo as HWND, byval nItemHeight as long )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetListItemHeight( byval hCombo as HWND, byval nItemHeight as long )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
-    if CComboBox_EnsureList( hCombo ) = 0 then exit sub
-    CPopupMenu_SetItemHeight( pCombo->hList, nItemHeight )
+    if PsComboBox_EnsureList( hCombo ) = 0 then exit sub
+    PsPopupMenu_SetItemHeight( pCombo->hList, nItemHeight )
 end sub
 
 
 ' ========================================================================================
 ' Callbacks
 ' ========================================================================================
-sub CComboBox_SetPaintCallback( byval hCombo as HWND, byval usersub as CBO_PaintCallbackSub )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetPaintCallback( byval hCombo as HWND, byval usersub as CBO_PaintCallbackSub )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     pCombo->PaintCallback = usersub
     if pCombo->hWin then InvalidateRect( pCombo->hWin, NULL, TRUE )
 end sub
 
-sub CComboBox_SetMessageCallback( byval hCombo as HWND, byval userfunc as CBO_MessageCallbackFunc )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetMessageCallback( byval hCombo as HWND, byval userfunc as CBO_MessageCallbackFunc )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     pCombo->MessageCallback = userfunc
 end sub
 
-sub CComboBox_SetSelChangeCallback( byval hCombo as HWND, byval usersub as CBO_SelChangeCallbackSub )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetSelChangeCallback( byval hCombo as HWND, byval usersub as CBO_SelChangeCallbackSub )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     pCombo->SelChangeCallback = usersub
 end sub
 
-sub CComboBox_SetDropDownCallback( byval hCombo as HWND, byval usersub as CBO_DropDownCallbackSub )
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+sub PsComboBox_SetDropDownCallback( byval hCombo as HWND, byval usersub as CBO_DropDownCallbackSub )
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then exit sub
     pCombo->DropDownCallback = usersub
 end sub
 
 
 ' ========================================================================================
-' THE message-pump hook. See the contract in CComboBox.bi.
+' THE message-pump hook. See the contract in PsComboBox.bi.
 '
 ' Two jobs, in this order:
 '
-'   1. ARM THE REOPEN GUARD. CPopupMenu's own filter dismisses the chain on an outside click
+'   1. ARM THE REOPEN GUARD. PsPopupMenu's own filter dismisses the chain on an outside click
 '      and then returns FALSE ON PURPOSE, so the click still reaches its target ("clicking a
 '      toolbar button while a menu is open both closes the menu and presses the button").
 '      For a click on OUR OWN BUTTON that is exactly wrong: the list would close here and the
@@ -1615,15 +1615,15 @@ end sub
 '      close-time heuristic, and it cannot mis-fire because it is cleared unconditionally by
 '      the first down-click that sees it.
 '
-'   2. DELEGATE to CPopupMenu's filter, which owns keyboard navigation, Escape, and the
+'   2. DELEGATE to PsPopupMenu's filter, which owns keyboard navigation, Escape, and the
 '      dismissal itself.
 '
 ' Returns FALSE immediately when this combobox's list is not open, so a host with several
 ' comboboxes can call it for each one in its pump at negligible cost.
 ' ========================================================================================
-function CComboBox_FilterMessage( byval hCombo as HWND, byval pMsg as MSG ptr ) as boolean
+function PsComboBox_FilterMessage( byval hCombo as HWND, byval pMsg as MSG ptr ) as boolean
     if pMsg = 0 then return false
-    dim as CCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
+    dim as PSCOMBOBOX ptr pCombo = GetComboBoxPointer(hCombo)
     if pCombo = 0 then return false
     if pCombo->hList = 0 then return false
     if pCombo->isOpen = false then return false
@@ -1632,12 +1632,12 @@ function CComboBox_FilterMessage( byval hCombo as HWND, byval pMsg as MSG ptr ) 
         if pMsg->hwnd = hCombo then pCombo->bSuppressNextOpen = true
     end if
 
-    return CPopupMenu_FilterMessage( pCombo->hList, pMsg )
+    return PsPopupMenu_FilterMessage( pCombo->hList, pMsg )
 end function
 
 
 ' ========================================================================================
-' Geometry self-test, run with CCOMBOBOX_SELFTEST=1.
+' Geometry self-test, run with PSCOMBOBOX_SELFTEST=1.
 '
 ' Every number is asserted, never eyeballed -- CLAUDE.md's rule, and Learnings.md records
 ' several "verifications" that were invalid because they were done by eye. Expectations are
@@ -1675,20 +1675,20 @@ private sub CBOTest_SizeTo( byval h as HWND, byval w as long, byval hgt as long,
     ch = rc.bottom - rc.top
 end sub
 
-sub CComboBox_RunSelfTest( byval hWndParent as HWND )
-    if environ("CCOMBOBOX_SELFTEST") <> "1" then exit sub
+sub PsComboBox_RunSelfTest( byval hWndParent as HWND )
+    if environ("PSCOMBOBOX_SELFTEST") <> "1" then exit sub
 
     gCBO_TestCount = 0
     gCBO_FailCount = 0
-    print "=== CComboBox geometry self-test ==="
+    print "=== PsComboBox geometry self-test ==="
 
-    dim as HWND h = CComboBox_Create( hWndParent, 9901 )
+    dim as HWND h = PsComboBox_Create( hWndParent, 9901 )
     if h = 0 then
-        print "FAIL  create   [CComboBox_Create returned 0]"
+        print "FAIL  create   [PsComboBox_Create returned 0]"
         exit sub
     end if
 
-    dim as CCOMBOBOX ptr pC = GetComboBoxPointer(h)
+    dim as PSCOMBOBOX ptr pC = GetComboBoxPointer(h)
     if pC = 0 then
         print "FAIL  pointer   [GetComboBoxPointer returned 0]"
         DestroyWindow(h)
@@ -1702,9 +1702,9 @@ sub CComboBox_RunSelfTest( byval hWndParent as HWND )
     dim as RECT rcBtn, rcTxt, rcChev, rcVis
 
     ' ---- 1. ideal size is valid BEFORE the control has ever been sized ------------------
-    CComboBox_AddItem( h, "Add to Existing Window" )
-    CComboBox_AddItem( h, "Open a New Window" )
-    CComboBox_GetIdealSize( h, w, h1 )
+    PsComboBox_AddItem( h, "Add to Existing Window" )
+    PsComboBox_AddItem( h, "Open a New Window" )
+    PsComboBox_GetIdealSize( h, w, h1 )
     sD = "w=" & str(w) & " h=" & str(h1)
     CBOTest_Check( "ideal size before first size", (w > 0) andalso (h1 > 0), sD )
 
@@ -1723,56 +1723,56 @@ sub CComboBox_RunSelfTest( byval hWndParent as HWND )
 
     ' ---- 3. textW is the WIDEST item, not the selected one ------------------------------
     dim as long widestBefore = pC->nTextWidth
-    CComboBox_SetCurSel( h, 1 )                    ' the SHORTER caption
+    PsComboBox_SetCurSel( h, 1 )                    ' the SHORTER caption
     pC->LayoutCombo()
     sD = "before=" & str(widestBefore) & " after=" & str(pC->nTextWidth)
     CBOTest_Check( "width unchanged by selection", (pC->nTextWidth = widestBefore), sD )
 
     ' ---- 4. deleting the widest item shrinks the measurement ----------------------------
-    CComboBox_DeleteItem( h, 0 )                   ' remove "Add to Existing Window"
+    PsComboBox_DeleteItem( h, 0 )                   ' remove "Add to Existing Window"
     pC->LayoutCombo()
     sD = "widest=" & str(widestBefore) & " now=" & str(pC->nTextWidth)
     CBOTest_Check( "widest re-measured after delete", (pC->nTextWidth < widestBefore), sD )
-    CComboBox_InsertItem( h, 0, "Add to Existing Window" )
+    PsComboBox_InsertItem( h, 0, "Add to Existing Window" )
     pC->LayoutCombo()
     sD = "restored=" & str(pC->nTextWidth) & " original=" & str(widestBefore)
     CBOTest_Check( "widest restored after insert", (pC->nTextWidth = widestBefore), sD )
 
     ' ---- 5. selection fix-up across the three mutation sites ----------------------------
     ' The list is now  0:"Add to Existing Window"  1:"Open a New Window".
-    CComboBox_SetCurSel( h, 1 )
-    CComboBox_InsertItem( h, 0, "Inserted Before" )
-    sD = "sel=" & str(CComboBox_GetCurSel(h)) & " expect=2"
-    CBOTest_Check( "insert before selection pushes it up", (CComboBox_GetCurSel(h) = 2), sD )
+    PsComboBox_SetCurSel( h, 1 )
+    PsComboBox_InsertItem( h, 0, "Inserted Before" )
+    sD = "sel=" & str(PsComboBox_GetCurSel(h)) & " expect=2"
+    CBOTest_Check( "insert before selection pushes it up", (PsComboBox_GetCurSel(h) = 2), sD )
 
-    CComboBox_InsertItem( h, 3, "Inserted After" )
-    sD = "sel=" & str(CComboBox_GetCurSel(h)) & " expect=2"
-    CBOTest_Check( "insert after selection leaves it", (CComboBox_GetCurSel(h) = 2), sD )
+    PsComboBox_InsertItem( h, 3, "Inserted After" )
+    sD = "sel=" & str(PsComboBox_GetCurSel(h)) & " expect=2"
+    CBOTest_Check( "insert after selection leaves it", (PsComboBox_GetCurSel(h) = 2), sD )
 
-    CComboBox_DeleteItem( h, 0 )
-    sD = "sel=" & str(CComboBox_GetCurSel(h)) & " expect=1"
-    CBOTest_Check( "delete before selection pulls it down", (CComboBox_GetCurSel(h) = 1), sD )
+    PsComboBox_DeleteItem( h, 0 )
+    sD = "sel=" & str(PsComboBox_GetCurSel(h)) & " expect=1"
+    CBOTest_Check( "delete before selection pulls it down", (PsComboBox_GetCurSel(h) = 1), sD )
 
-    CComboBox_DeleteItem( h, 1 )
-    sD = "sel=" & str(CComboBox_GetCurSel(h)) & " expect=-1"
-    CBOTest_Check( "delete OF selection clears it", (CComboBox_GetCurSel(h) = -1), sD )
+    PsComboBox_DeleteItem( h, 1 )
+    sD = "sel=" & str(PsComboBox_GetCurSel(h)) & " expect=-1"
+    CBOTest_Check( "delete OF selection clears it", (PsComboBox_GetCurSel(h) = -1), sD )
 
-    CComboBox_Clear( h )
-    sD = "count=" & str(CComboBox_GetCount(h)) & " sel=" & str(CComboBox_GetCurSel(h))
+    PsComboBox_Clear( h )
+    sD = "count=" & str(PsComboBox_GetCount(h)) & " sel=" & str(PsComboBox_GetCurSel(h))
     CBOTest_Check( "clear empties and clears selection", _
-                   (CComboBox_GetCount(h) = 0) andalso (CComboBox_GetCurSel(h) = -1), sD )
+                   (PsComboBox_GetCount(h) = 0) andalso (PsComboBox_GetCurSel(h) = -1), sD )
 
     ' ---- 6. disabled items ---------------------------------------------------------------
-    CComboBox_AddItem( h, "Add to Existing Window", 100 )
-    CComboBox_AddItem( h, "Open a New Window", 200 )
-    CComboBox_AddItem( h, "Disabled Choice", 300 )
-    CComboBox_SetItemEnabled( h, 2, false )
-    dim as boolean bTookDisabled = CComboBox_SetCurSel( h, 2 )
-    sD = "SetCurSel(2)=" & str(bTookDisabled) & " sel=" & str(CComboBox_GetCurSel(h))
+    PsComboBox_AddItem( h, "Add to Existing Window", 100 )
+    PsComboBox_AddItem( h, "Open a New Window", 200 )
+    PsComboBox_AddItem( h, "Disabled Choice", 300 )
+    PsComboBox_SetItemEnabled( h, 2, false )
+    dim as boolean bTookDisabled = PsComboBox_SetCurSel( h, 2 )
+    sD = "SetCurSel(2)=" & str(bTookDisabled) & " sel=" & str(PsComboBox_GetCurSel(h))
     CBOTest_Check( "SetCurSel refuses a disabled item", _
-                   (bTookDisabled = false) andalso (CComboBox_GetCurSel(h) <> 2), sD )
+                   (bTookDisabled = false) andalso (PsComboBox_GetCurSel(h) <> 2), sD )
 
-    CComboBox_SetCurSel( h, 1 )
+    PsComboBox_SetCurSel( h, 1 )
     dim as long nNext = pC->NextSelectable( 1, 1 )
     sD = "NextSelectable(1,+1)=" & str(nNext) & " expect=-1 (2 is disabled, no wrap)"
     CBOTest_Check( "arrow skips disabled and CLAMPS", (nNext = -1), sD )
@@ -1782,35 +1782,35 @@ sub CComboBox_RunSelfTest( byval hWndParent as HWND )
     CBOTest_Check( "End lands on last ENABLED item", (nPrev = 1), sD )
 
     ' ---- 7. -1 / placeholder --------------------------------------------------------------
-    CComboBox_SetCurSel( h, -1 )
+    PsComboBox_SetCurSel( h, -1 )
     dim as boolean bPH = false
     dim as DWSTRING wszShown = pC->DisplayText( bPH )
     sD = "len=" & str(len(wszShown)) & " isPlaceholder=" & str(bPH)
     CBOTest_Check( "no selection, no placeholder draws nothing", _
                    (len(wszShown) = 0) andalso (bPH = false), sD )
 
-    CComboBox_SetPlaceholderText( h, "Choose..." )
+    PsComboBox_SetPlaceholderText( h, "Choose..." )
     wszShown = pC->DisplayText( bPH )
     sD = "len=" & str(len(wszShown)) & " isPlaceholder=" & str(bPH)
     CBOTest_Check( "no selection with placeholder draws it", _
                    (len(wszShown) > 0) andalso (bPH = true), sD )
 
     dim as long wWithPH, hWithPH
-    CComboBox_GetIdealSize( h, wWithPH, hWithPH )
-    CComboBox_SetPlaceholderText( h, "A Very Much Longer Placeholder String Indeed" )
+    PsComboBox_GetIdealSize( h, wWithPH, hWithPH )
+    PsComboBox_SetPlaceholderText( h, "A Very Much Longer Placeholder String Indeed" )
     dim as long wLongPH, hLongPH
-    CComboBox_GetIdealSize( h, wLongPH, hLongPH )
+    PsComboBox_GetIdealSize( h, wLongPH, hLongPH )
     sD = "short=" & str(wWithPH) & " long=" & str(wLongPH)
     CBOTest_Check( "placeholder does NOT affect the width", (wWithPH = wLongPH), sD )
-    CComboBox_SetPlaceholderText( h, "" )
+    PsComboBox_SetPlaceholderText( h, "" )
 
     ' ---- 8. rects partition the button, with the ring band reserved ---------------------
-    CComboBox_GetIdealSize( h, w, h1 )
+    PsComboBox_GetIdealSize( h, w, h1 )
     CBOTest_SizeTo( h, w, h1, cw, ch )
-    CComboBox_GetButtonRect( h, rcBtn )
-    CComboBox_GetTextRect( h, rcTxt )
-    CComboBox_GetChevronRect( h, rcChev )
-    CComboBox_GetVisualRect( h, rcVis )
+    PsComboBox_GetButtonRect( h, rcBtn )
+    PsComboBox_GetTextRect( h, rcTxt )
+    PsComboBox_GetChevronRect( h, rcChev )
+    PsComboBox_GetVisualRect( h, rcVis )
 
     sD = "client=" & str(cw) & "x" & str(ch) & " button=" & str(rcBtn.left) & "," & _
          str(rcBtn.top) & "," & str(rcBtn.right) & "," & str(rcBtn.bottom) & " ring=" & str(ringPad)
@@ -1847,7 +1847,7 @@ sub CComboBox_RunSelfTest( byval hWndParent as HWND )
     dim as RECT rcBtnUnfocused = rcBtn
     pC->isFocused = true
     pC->bLayoutDirty = true
-    CComboBox_GetButtonRect( h, rcBtn )
+    PsComboBox_GetButtonRect( h, rcBtn )
     pC->isFocused = false
     sD = "unfocused.left=" & str(rcBtnUnfocused.left) & " focused.left=" & str(rcBtn.left)
     CBOTest_Check( "button does not move when focus arrives", _
@@ -1855,48 +1855,48 @@ sub CComboBox_RunSelfTest( byval hWndParent as HWND )
 
     ' ---- 9. arrow-only mode ---------------------------------------------------------------
     dim as long wText = w
-    CComboBox_SetShowText( h, false )
+    PsComboBox_SetShowText( h, false )
     dim as long wArrow, hArrow
-    CComboBox_GetIdealSize( h, wArrow, hArrow )
+    PsComboBox_GetIdealSize( h, wArrow, hArrow )
     dim as long expectArrow = (2 * ringPad) + pC->nPadLeft + pC->nChevronWidth + pC->nPadRight
     sD = "arrow=" & str(wArrow) & " expect=" & str(expectArrow) & " withText=" & str(wText)
     CBOTest_Check( "arrow-only width = pad+chevron+pad (no text, NO GAP)", _
                    (wArrow = expectArrow) andalso (wArrow < wText), sD )
 
     CBOTest_SizeTo( h, wArrow, hArrow, cw, ch )
-    CComboBox_GetTextRect( h, rcTxt )
+    PsComboBox_GetTextRect( h, rcTxt )
     sD = "textRect=" & str(rcTxt.left) & "," & str(rcTxt.top) & "," & str(rcTxt.right) & "," & str(rcTxt.bottom)
     CBOTest_Check( "arrow-only text rect is empty", IsRectEmpty( @rcTxt ) <> 0, sD )
-    CComboBox_SetShowText( h, true )
+    PsComboBox_SetShowText( h, true )
 
     ' ---- 9b. CBO_TEXT_WHENSELECTED: collapsed while -1, expanded once selected ----------
-    CComboBox_SetTextMode( h, CBO_TEXT_WHENSELECTED )
-    CComboBox_SetCurSel( h, -1 )
+    PsComboBox_SetTextMode( h, CBO_TEXT_WHENSELECTED )
+    PsComboBox_SetCurSel( h, -1 )
     dim as long wCollapsed, hCollapsed
-    CComboBox_GetIdealSize( h, wCollapsed, hCollapsed )
+    PsComboBox_GetIdealSize( h, wCollapsed, hCollapsed )
     sD = "collapsed=" & str(wCollapsed) & " arrowOnly=" & str(wArrow) & " withText=" & str(wText)
     CBOTest_Check( "WHENSELECTED with -1 is exactly the arrow-only width", _
                    (wCollapsed = wArrow), sD )
 
-    CComboBox_GetTextRect( h, rcTxt )
+    PsComboBox_GetTextRect( h, rcTxt )
     sD = "textRect empty=" & str(IsRectEmpty( @rcTxt ) <> 0) & _
-         " GetShowText=" & str(CComboBox_GetShowText(h))
+         " GetShowText=" & str(PsComboBox_GetShowText(h))
     CBOTest_Check( "WHENSELECTED with -1 draws no caption", _
-                   (IsRectEmpty( @rcTxt ) <> 0) andalso (CComboBox_GetShowText(h) = false), sD )
+                   (IsRectEmpty( @rcTxt ) <> 0) andalso (PsComboBox_GetShowText(h) = false), sD )
 
     ' A placeholder cannot surface in this mode -- the only state that would show one is the
     ' collapsed state, which has no caption at all.
-    CComboBox_SetPlaceholderText( h, "Choose an action..." )
+    PsComboBox_SetPlaceholderText( h, "Choose an action..." )
     dim as long wCollapsedPH, hCollapsedPH
-    CComboBox_GetIdealSize( h, wCollapsedPH, hCollapsedPH )
+    PsComboBox_GetIdealSize( h, wCollapsedPH, hCollapsedPH )
     sD = "withPlaceholder=" & str(wCollapsedPH) & " without=" & str(wCollapsed)
     CBOTest_Check( "WHENSELECTED ignores the placeholder entirely", _
                    (wCollapsedPH = wCollapsed), sD )
-    CComboBox_SetPlaceholderText( h, "" )
+    PsComboBox_SetPlaceholderText( h, "" )
 
-    CComboBox_SetCurSel( h, 0 )
+    PsComboBox_SetCurSel( h, 0 )
     dim as long wExpanded, hExpanded
-    CComboBox_GetIdealSize( h, wExpanded, hExpanded )
+    PsComboBox_GetIdealSize( h, wExpanded, hExpanded )
     sD = "expanded=" & str(wExpanded) & " withText=" & str(wText) & " collapsed=" & str(wCollapsed)
     CBOTest_Check( "WHENSELECTED expands to the full captioned width on first pick", _
                    (wExpanded = wText) andalso (wExpanded > wCollapsed), sD )
@@ -1905,16 +1905,16 @@ sub CComboBox_RunSelfTest( byval hWndParent as HWND )
     ' off. So the caption has nowhere to go and rcText degenerates against the chevron. That
     ' is this mode's documented cost, asserted here rather than left as a surprise: the
     ' control owns its size only when the host says so.
-    CComboBox_GetTextRect( h, rcTxt )
+    PsComboBox_GetTextRect( h, rcTxt )
     sD = "textRect=" & str(rcTxt.left) & "," & str(rcTxt.right) & _
          " window still " & str(wArrow) & " wide, ideal now " & str(wExpanded)
     CBOTest_Check( "WHENSELECTED at the OLD window size has nowhere for the caption", _
-                   (rcTxt.right = rcTxt.left) andalso (CComboBox_GetShowText(h) = true), sD )
+                   (rcTxt.right = rcTxt.left) andalso (PsComboBox_GetShowText(h) = true), sD )
 
     ' Apply the new ideal size, which is exactly what a host must do here.
     CBOTest_SizeTo( h, wExpanded, hExpanded, cw, ch )
-    CComboBox_GetTextRect( h, rcTxt )
-    CComboBox_GetChevronRect( h, rcChev )
+    PsComboBox_GetTextRect( h, rcTxt )
+    PsComboBox_GetChevronRect( h, rcChev )
     sD = "textRect=" & str(rcTxt.left) & ".." & str(rcTxt.right) & _
          " chevron.left-gap=" & str(rcChev.left - pC->nTextGap)
     CBOTest_Check( "WHENSELECTED draws a real caption once the host resizes", _
@@ -1923,84 +1923,84 @@ sub CComboBox_RunSelfTest( byval hWndParent as HWND )
 
     ' With auto-size ON the control applies that width change ITSELF as the boundary is
     ' crossed, which is what makes the mode usable without a SelChange handler at all.
-    CComboBox_SetCurSel( h, -1 )
-    CComboBox_SetAutoSize( h, true )
+    PsComboBox_SetCurSel( h, -1 )
+    PsComboBox_SetAutoSize( h, true )
     dim as RECT rcWin
     GetWindowRect( h, @rcWin )
     dim as long wWinCollapsed = rcWin.right - rcWin.left
-    CComboBox_SetCurSel( h, 0 )
+    PsComboBox_SetCurSel( h, 0 )
     GetWindowRect( h, @rcWin )
     dim as long wWinExpanded = rcWin.right - rcWin.left
     sD = "window " & str(wWinCollapsed) & " -> " & str(wWinExpanded) & _
          "  (ideal " & str(wCollapsed) & " -> " & str(wExpanded) & ")"
     CBOTest_Check( "auto-size applies the boundary width change itself", _
                    (wWinCollapsed = wCollapsed) andalso (wWinExpanded = wExpanded), sD )
-    CComboBox_SetAutoSize( h, false )
+    PsComboBox_SetAutoSize( h, false )
 
     ' Selection-to-selection must NOT move the width -- the widest-item rule still holds
     ' inside the expanded state, which is the whole reason the boundary case is acceptable.
-    CComboBox_SetCurSel( h, 1 )
+    PsComboBox_SetCurSel( h, 1 )
     dim as long wOther, hOther
-    CComboBox_GetIdealSize( h, wOther, hOther )
+    PsComboBox_GetIdealSize( h, wOther, hOther )
     sD = "sel0=" & str(wExpanded) & " sel1=" & str(wOther)
     CBOTest_Check( "WHENSELECTED width is stable between selections", (wOther = wExpanded), sD )
 
     ' And back: clearing the selection collapses it again.
-    CComboBox_SetCurSel( h, -1 )
+    PsComboBox_SetCurSel( h, -1 )
     dim as long wBack, hBack
-    CComboBox_GetIdealSize( h, wBack, hBack )
+    PsComboBox_GetIdealSize( h, wBack, hBack )
     sD = "back=" & str(wBack) & " collapsed=" & str(wCollapsed)
     CBOTest_Check( "WHENSELECTED collapses again when cleared", (wBack = wCollapsed), sD )
 
     ' Disabling the current item clears it, which must collapse the button too.
-    CComboBox_SetCurSel( h, 0 )
-    CComboBox_SetItemEnabled( h, 0, false )
+    PsComboBox_SetCurSel( h, 0 )
+    PsComboBox_SetItemEnabled( h, 0, false )
     dim as long wDis, hDis
-    CComboBox_GetIdealSize( h, wDis, hDis )
-    sD = "sel=" & str(CComboBox_GetCurSel(h)) & " width=" & str(wDis) & " collapsed=" & str(wCollapsed)
+    PsComboBox_GetIdealSize( h, wDis, hDis )
+    sD = "sel=" & str(PsComboBox_GetCurSel(h)) & " width=" & str(wDis) & " collapsed=" & str(wCollapsed)
     CBOTest_Check( "disabling the current item collapses WHENSELECTED", _
-                   (CComboBox_GetCurSel(h) = -1) andalso (wDis = wCollapsed), sD )
-    CComboBox_SetItemEnabled( h, 0, true )
+                   (PsComboBox_GetCurSel(h) = -1) andalso (wDis = wCollapsed), sD )
+    PsComboBox_SetItemEnabled( h, 0, true )
 
-    CComboBox_SetTextMode( h, CBO_TEXT_ALWAYS )
-    CComboBox_SetCurSel( h, 1 )
+    PsComboBox_SetTextMode( h, CBO_TEXT_ALWAYS )
+    PsComboBox_SetCurSel( h, 1 )
 
     ' ---- 10. the popup id <-> model index round trip ------------------------------------
-    ' The rows carry (index + 1) so that index 0 does not collide with CPopupMenu's separator
+    ' The rows carry (index + 1) so that index 0 does not collide with PsPopupMenu's separator
     ' id, and so the host's own item ids never enter the command stream.
-    dim as HWND hL = CComboBox_EnsureList( h )
+    dim as HWND hL = PsComboBox_EnsureList( h )
     if hL = 0 then
-        CBOTest_Check( "list created", false, "CComboBox_EnsureList returned 0" )
+        CBOTest_Check( "list created", false, "PsComboBox_EnsureList returned 0" )
     else
-        CComboBox_SetCurSel( h, 1 )
-        CComboBox_RebuildListItems( pC )
-        dim as long nRows = CPopupMenu_GetItemCount( hL )
-        sD = "rows=" & str(nRows) & " items=" & str(CComboBox_GetCount(h))
-        CBOTest_Check( "one row per item", (nRows = CComboBox_GetCount(h)), sD )
+        PsComboBox_SetCurSel( h, 1 )
+        PsComboBox_RebuildListItems( pC )
+        dim as long nRows = PsPopupMenu_GetItemCount( hL )
+        sD = "rows=" & str(nRows) & " items=" & str(PsComboBox_GetCount(h))
+        CBOTest_Check( "one row per item", (nRows = PsComboBox_GetCount(h)), sD )
 
         ' Row ids are 1-based, so the CHECKED row for selection 1 is id 2.
-        dim as boolean bChk1 = CPopupMenu_GetItemChecked( hL, 2 )
-        dim as boolean bChk0 = CPopupMenu_GetItemChecked( hL, 1 )
+        dim as boolean bChk1 = PsPopupMenu_GetItemChecked( hL, 2 )
+        dim as boolean bChk0 = PsPopupMenu_GetItemChecked( hL, 1 )
         sD = "checked(id2)=" & str(bChk1) & " checked(id1)=" & str(bChk0) & " sel=1"
         CBOTest_Check( "exactly the selected row is checked (id = idx+1)", _
                        (bChk1 = true) andalso (bChk0 = false), sD )
 
-        dim as boolean bDis = CPopupMenu_GetItemEnabled( hL, 3 )
+        dim as boolean bDis = PsPopupMenu_GetItemEnabled( hL, 3 )
         sD = "enabled(id3)=" & str(bDis) & " (model item 2 is disabled)"
         CBOTest_Check( "disabled item is disabled in the list", (bDis = false), sD )
 
         ' ---- 11. SyncListWidth converges ------------------------------------------------
         ' Case A: the button is WIDER than the natural content, so the floor binds and the
         ' popup should land on the button width exactly.
-        CComboBox_GetIdealSize( h, w, h1 )
+        PsComboBox_GetIdealSize( h, w, h1 )
         dim as long natW, natH
-        CPopupMenu_SetMinWidth( hL, 0 )
-        CPopupMenu_GetIdealSize( hL, natW, natH )
+        PsPopupMenu_SetMinWidth( hL, 0 )
+        PsPopupMenu_GetIdealSize( hL, natW, natH )
 
         dim as long wide = natW + 60
-        CComboBox_SyncListWidth( hL, wide )
+        PsComboBox_SyncListWidth( hL, wide )
         dim as long gotW, gotH
-        CPopupMenu_GetIdealSize( hL, gotW, gotH )
+        PsPopupMenu_GetIdealSize( hL, gotW, gotH )
         sD = "natural=" & str(natW) & " target=" & str(wide) & " got=" & str(gotW)
         CBOTest_Check( "SyncListWidth hits the button width when the floor binds", _
                        (gotW = wide), sD )
@@ -2009,8 +2009,8 @@ sub CComboBox_RunSelfTest( byval hWndParent as HWND )
         ' and the popup keeps its natural width -- never squeezed below its content.
         dim as long narrow = natW - 40
         if narrow < 1 then narrow = 1
-        CComboBox_SyncListWidth( hL, narrow )
-        CPopupMenu_GetIdealSize( hL, gotW, gotH )
+        PsComboBox_SyncListWidth( hL, narrow )
+        PsPopupMenu_GetIdealSize( hL, gotW, gotH )
         sD = "natural=" & str(natW) & " target=" & str(narrow) & " got=" & str(gotW)
         CBOTest_Check( "SyncListWidth leaves a wide list alone", (gotW = natW), sD )
 
@@ -2029,7 +2029,7 @@ sub CComboBox_RunSelfTest( byval hWndParent as HWND )
 
     ' ---- 13. the control is a tab ITEM, not a tab CONTAINER -----------------------------
     ' Added 2026-07-23, because this SHIPPED BROKEN. CWindow.Create defaults dwExStyle to
-    ' WS_EX_CONTROLPARENT OR WS_EX_WINDOWEDGE and CComboBox_Create passed only dwStyle, so the
+    ' WS_EX_CONTROLPARENT OR WS_EX_WINDOWEDGE and PsComboBox_Create passed only dwStyle, so the
     ' control declared itself a container; the dialog manager descended into it, found no
     ' children, and skipped it. None of the 43 assertions above could see that, because nothing
     ' here had ever asked what the dialog manager sees -- and the demo masked it by also
@@ -2066,7 +2066,7 @@ sub CComboBox_RunSelfTest( byval hWndParent as HWND )
 
     DestroyWindow(h)
 
-    dim as string sSummary = "=== CComboBox: " & str(gCBO_TestCount - gCBO_FailCount) & _
+    dim as string sSummary = "=== PsComboBox: " & str(gCBO_TestCount - gCBO_FailCount) & _
                              "/" & str(gCBO_TestCount) & " assertions passed"
     if gCBO_FailCount > 0 then sSummary &= "  (" & str(gCBO_FailCount) & " FAILED)"
     print sSummary
