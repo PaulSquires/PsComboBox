@@ -237,6 +237,10 @@ type PSCOMBOBOX
     isEnabled         as boolean = true
     isHot             as boolean = false   ' the mouse is over the client
     isFocused         as boolean = false
+    ' Set when a WM_KEYDOWN we consume will be followed by a WM_CHAR, so that character can be
+    ' swallowed too. Without it the character reaches DefWindowProc and the system BEEPS on
+    ' every Enter/Space -- the keystroke still works, so the beep is the only symptom.
+    bAteKeyDown   as boolean = false
     hotTimerOn        as boolean = false   ' is the hot-tracking safety-net timer running?
     ' --- The dropdown. One PsPopupMenu, created lazily on first open and owned for the
     '     control's lifetime (destroyed in WM_DESTROY). Its rows are rebuilt from items()
